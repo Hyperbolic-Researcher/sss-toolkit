@@ -219,3 +219,189 @@ def fetch(cfg, batch=25, limit=0, stop_flag=None):
     common.log("歌词完成：%d/%d 有官方歌词" % (have, len(videos)))
     common.write_state(stage="lyrics", running=False, done=have, total=len(videos))
     return idx
+
+# ═══════════════════════════════════════════════════════════════
+# 回退路径：从视频简介(description)提取歌词
+#
+# ★ 为什么需要：部分视频没有官方字幕轨道，但作者把完整歌词写在简介里
+#   （实测 Super Simple 就是如此，"LYRICS:" 开头，到版权声明结束）。
+#   字幕接口有 HTTP 429 限流（CDN 级别，换 IP/换 client 都无效），
+#   而简介属于普通页面数据，不受同样限制，且内容是官方原文、无 ASR 噪声。
+#
+# 局限：没有时间轴。语速改用「总词数 / 视频时长」估算。
+# ═══════════════════════════════════════════════════════════════
+_START_RE = re.compile(r"^\s*(?:★+\s*)?(?:LYRICS?|Lyrics?|Let'?s\s+sing)[:：]?\s*$", re.I | re.M)
+_END_RE = re.compile(r"(?:\*{3,}|©|#\w|PARENTS AND TEACHERS|SOCIAL MEDIA|FREE SUPER SIMPLE|Get the Super Simple App)", re.I)
+
+
+def extract_lyrics_from_desc(desc):
+    """从简介里抠出歌词段落。返回 (text, used_marker)"""
+    if not desc:
+        return "", False
+    m = _START_RE.search(desc)
+    if not m:
+        i = desc.find("♫")
+        if i < 0:
+            return "", False
+        seg = desc[i:]
+    else:
+        seg = desc[m.end():]
+    e = _END_RE.search(seg)
+    if e:
+        seg = seg[:e.start()]
+    lines, out, blank = [], [], False
+    for ln in seg.split("\n"):
+        t = ln.strip().strip("♫").strip()
+        if not t:
+            if not blank and out:
+                out.append("")
+            blank = True
+            continue
+        if len(t) > 200 or re.match(r"^(https?://|►|▸|-{3,})", t, re.I):
+            continue
+        out.append(t)
+        blank = False
+    while out and out[0] == "":
+        out.pop(0)
+    while out and out[-1] == "":
+        out.pop()
+    return "\n".join(out), bool(m)
+
+
+def analyze_text_only(text, duration=0):
+    """无时间轴的难度计算（语速按时长估算）"""
+    lines = [l for l in text.split("\n") if l.strip()]
+    words = re.findall(r"[a-z']+", text.lower())
+    total = len(words)
+    if total < 3 or not lines:
+        return None
+    uniq = set(words)
+    avg_sent = total / max(len(lines), 1)
+    repeat_ratio = 1 - len(uniq) / total
+    wpm = (total / (duration / 60)) if duration and duration > 10 else total / max(len(lines) * 4 / 60, 1)
+
+    s_wpm = min(wpm / 140, 1.5)
+    s_uniq = min(len(uniq) / 70, 1.5)
+    s_sent = min(avg_sent / 12, 1.5)
+    s_rep = max(0.0, min((0.75 - repeat_ratio) / 0.75, 1.5))
+    score = 0.38 * s_wpm + 0.32 * s_uniq + 0.15 * s_sent + 0.15 * s_rep
+
+    if score < 0.35:   lvl, cn = "L1", "L1 入门(零基础)"
+    elif score < 0.50: lvl, cn = "L2", "L2 简单"
+    elif score < 0.65: lvl, cn = "L3", "L3 中等"
+    elif score < 0.82: lvl, cn = "L4", "L4 较难"
+    else:              lvl, cn = "L5", "L5 复杂"
+
+    return {
+        "unique_words": len(uniq), "total_words": total,
+        "wpm": round(wpm, 1), "avg_sent_len": round(avg_sent, 1),
+        "repeat_ratio": round(repeat_ratio, 3),
+        "cue_count": len(lines), "span_sec": round(duration or 0, 1),
+        "difficulty_score": round(score, 3),
+        "level": lvl, "level_cn": cn,
+        "unique_word_list": sorted(uniq),
+        "preview": " / ".join(lines[:3])[:120],
+    }
+
+
+def fetch_desc_fallback(cfg, batch=8, limit=0, stop_flag=None):
+    """对仍无歌词的视频，尝试从简介提取。返回更新后的索引"""
+    out_dir = cfg["output_dir"]
+    ly = cfg["lyrics"]
+    sub_dir = os.path.join(out_dir, ly.get("sub_dir_name") or "lyrics")
+    os.makedirs(sub_dir, exist_ok=True)
+
+    videos = scan_mod.read_list(out_dir)
+    idx = {}
+    if os.path.exists(idx_path(out_dir)):
+        try:
+            idx = json.load(open(idx_path(out_dir), encoding="utf-8"))
+        except Exception:
+            idx = {}
+
+    todo = [v[0] for v in videos if not idx.get(v[0], {}).get("has_lyrics")]
+    if limit:
+        todo = todo[:limit]
+    if not todo:
+        common.log("没有需要回退的条目")
+        return idx
+
+    common.log("简介歌词回退：待处理 %d 个" % len(todo))
+    net = cfg["network"]; adv = cfg["advanced"]
+    base = [common.py(), "-m", "yt_dlp", "--skip-download", "--no-warnings",
+            "--socket-timeout", "25", "--retries", "2"]
+    if net.get("proxy_enabled") and net.get("proxy"):
+        base += ["--proxy", net["proxy"]]
+    deno = common.find_deno(cfg)
+    if deno:
+        base += ["--js-runtimes", "deno:" + deno]
+    extra = "youtube:player_client=" + adv.get("player_client", "mweb,tv,web,ios")
+    if net.get("pot_server"):
+        extra += ";youtubepot-bgutilhttp:base_url=" + net["pot_server"]
+    base += ["--extractor-args", extra, "--print", "%(id)s\t%(description)s"]
+
+    dur_map = {}
+    try:
+        import openpyxl
+        xp = os.path.join(out_dir, cfg["report"].get("filename") or "媒体库清单.xlsx")
+        if os.path.exists(xp):
+            wb = openpyxl.load_workbook(xp, read_only=True)
+            ws = wb["媒体库清单"]
+            rr = list(ws.iter_rows(min_row=1, values_only=True))
+            h = list(rr[0]); ii = h.index("视频ID"); idu = h.index("时长秒")
+            for r in rr[1:]:
+                try: dur_map[r[ii]] = float(r[idu] or 0)
+                except Exception: pass
+            wb.close()
+    except Exception:
+        pass
+
+    merged = 0
+    for bi in range(0, len(todo), batch):
+        if stop_flag and stop_flag():
+            break
+        chunk = todo[bi:bi + batch]
+        urls = ["https://www.youtube.com/watch?v=" + v for v in chunk]
+        try:
+            r = subprocess.run(base + urls, capture_output=True, text=True,
+                               env=common.env_no_proxy(), timeout=600,
+                               encoding="utf-8", errors="replace")
+            out = r.stdout or ""
+        except Exception as e:
+            common.log("简介批次异常: %s" % str(e)[:60], "WARN")
+            continue
+
+        parts = re.split(r"(?m)^([A-Za-z0-9_-]{11})\t", out)
+        for i in range(1, len(parts) - 1, 2):
+            vid, desc = parts[i], parts[i + 1]
+            text, used = extract_lyrics_from_desc(desc)
+            if not text:
+                idx.setdefault(vid, {})["has_lyrics"] = False
+                idx[vid]["note"] = "简介无歌词"
+                continue
+            a = analyze_text_only(text, dur_map.get(vid, 0))
+            if not a:
+                continue
+            p = os.path.join(sub_dir, vid + ".lyrics.txt")
+            try:
+                open(p, "w", encoding="utf-8").write(text)
+            except Exception:
+                pass
+            a["has_lyrics"] = True
+            a["source"] = "官方简介歌词"
+            a["has_timeline"] = False
+            a["lyrics_txt"] = p.replace("\\", "/")
+            idx[vid] = a
+            merged += 1
+
+        done = sum(1 for v in idx.values() if v.get("has_lyrics"))
+        common.log("简介回退进度 %d/%d（本次新增 %d）" % (min(bi+batch, len(todo)), len(todo), merged))
+        common.write_state(stage="lyrics_desc", done=done, total=len(videos))
+        try:
+            json.dump(idx, open(idx_path(out_dir), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+        except Exception:
+            pass
+        import time as _t; _t.sleep(1)
+
+    common.log("简介回退完成：新增 %d 条" % merged)
+    return idx

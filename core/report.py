@@ -258,6 +258,8 @@ def build(cfg):
             "歌词来源": lv.get("source", "官方手动字幕") if lv.get("has_lyrics") else "无",
             "歌词SRT": lv.get("srt", ""),
             "歌词LRC": lv.get("lrc", ""),
+            "歌词TXT": lv.get("lyrics_txt", ""),
+            "时间轴": "有" if lv.get("srt") else ("无（简介歌词）" if lv.get("lyrics_txt") else ""),
             "下载状态": status,
             "质量评级": grade,
         })
@@ -296,6 +298,8 @@ def build(cfg):
         ("视频总数", len(rows)),
         ("已下载", len(done)),
         ("有官方歌词", len(withl)),
+        ("  其中官方字幕(带时间轴)", len([r for r in rows if r["歌词SRT"]])),
+        ("  其中官方简介(纯文本)", len([r for r in rows if r["歌词TXT"] and not r["歌词SRT"]])),
         ("最高品质(Opus)", len([r for r in rows if r["质量评级"] == "✅ 最高品质"])),
         ("音轨次优", len([r for r in rows if r["质量评级"] == "⚠️ 音轨次优"])),
         ("低于画质阈值", len([r for r in rows if r["质量评级"] == "⚠️ 低于阈值"])),

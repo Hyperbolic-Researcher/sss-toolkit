@@ -7,6 +7,7 @@
     python sss.py scan             扫描频道生成清单
     python sss.py download         下载（可反复跑，断点续传）
     python sss.py lyrics           抓官方歌词 + 算难度
+    python sss.py lyrics-desc      对没字幕的视频从「视频简介」提取歌词（回退路径）
     python sss.py report           生成 Excel
     python sss.py all              一条龙：scan → download → lyrics → report
 
@@ -90,6 +91,11 @@ def cmd_lyrics(cfg, args):
     return 0
 
 
+def cmd_lyrics_desc(cfg, args):
+    lyr.fetch_desc_fallback(cfg, batch=8, limit=args.limit)
+    return 0
+
+
 def cmd_report(cfg, args):
     out = rep.build(cfg)
     return 0 if out else 1
@@ -98,7 +104,7 @@ def cmd_report(cfg, args):
 def main():
     ap = argparse.ArgumentParser(description="sss-toolkit：频道资料库一键构建")
     ap.add_argument("command", nargs="?", default="all",
-                    choices=["check", "scan", "download", "lyrics", "report", "all"])
+                    choices=["check", "scan", "download", "lyrics", "lyrics-desc", "report", "all"])
     ap.add_argument("--url", help="频道/播放列表 URL（默认读 config.json）")
     ap.add_argument("--limit", type=int, default=0, help="只处理前 N 个（调试用）")
     ap.add_argument("--batch", type=int, default=24, help="每批数量")
@@ -116,6 +122,8 @@ def main():
         return cmd_download(cfg, args)
     if cmd == "lyrics":
         return cmd_lyrics(cfg, args)
+    if cmd == "lyrics-desc":
+        return cmd_lyrics_desc(cfg, args)
     if cmd == "report":
         return cmd_report(cfg, args)
 
@@ -128,6 +136,11 @@ def main():
     cmd_download(cfg, args)
     print("\n>>> 3/4 抓取歌词")
     cmd_lyrics(cfg, args)
+    print("    回退：从视频简介提取")
+    try:
+        cmd_lyrics_desc(cfg, args)
+    except Exception as e:
+        print("    简介回退跳过：%s" % e)
     print("\n>>> 4/4 生成报表")
     cmd_report(cfg, args)
     print("\n全部完成。输出目录：%s" % cfg["output_dir"])
