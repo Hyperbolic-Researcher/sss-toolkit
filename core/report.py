@@ -22,11 +22,11 @@ THEME_RULES = [
     ("生日与派对 / Birthday & Party", [r"birthday", r"\bparty\b", r"celebrat", r"\bcandle"]),
     ("情人节与春季节日 / Valentine & Spring", [r"valentine", r"\beaster", r"mother'?s day", r"father'?s day", r"\bthanksgiving", r"new year", r"st\.? patrick"]),
     ("字母与拼读 / Alphabet & Phonics", [r"alphabet", r"\babc\b", r"\bletters?\b", r"phonics", r"spell", r"a is for"]),
-    ("数字与计数 / Numbers & Counting", [r"\bcount", r"\bnumbers?\b", r"ten little", r"one two", r"five little", r"how many", r"\bone\b", r"\btwo\b", r"\bthree\b", r"\bfour\b", r"\bfive\b", r"\bsix\b", r"\bseven\b", r"\beight\b", r"\bnine\b", r"\bten\b", r"adding up"]),
+    ("数字与计数 / Numbers & Counting", [r"\bcount", r"\bnumbers?\b", r"ten little", r"one two", r"five little", r"how many", r"\bone\b", r"\btwo\b", r"\bthree\b", r"\bfour\b", r"\bfive\b", r"\bsix\b", r"\bseven\b", r"\beight\b", r"\bnine\b", r"\bten\b", r"adding up", r"\d+\s+little", r"\bdozen"]),
     ("颜色与形状 / Colors & Shapes", [r"colou?r", r"\bshapes?\b", r"\bcircle\b", r"\bsquare\b", r"triangle", r"\bred\b", r"\byellow\b", r"\bblue\b", r"\bgreen\b", r"\borange\b", r"\bpink\b", r"\bpurple\b", r"\bbrown\b", r"\bblack\b", r"\bwhite\b"]),
     ("时间与日历 / Time & Calendar", [r"days? of the week", r"months?", r"\bweek\b", r"\btoday\b", r"\bclock\b", r"\bcalendar", r"\bmonday", r"\bsunday"]),
     ("认知与相反概念 / Concepts & Opposites", [r"opposite", r"big and small", r"open shut", r"same and different", r"what'?s this", r"what'?s that", r"who took", r"where is", r"can you imagine", r"peekaboo", r"peek-a-boo", r"mystery box"]),
-    ("动物 / Animals", [r"animal", r"\bzoo\b", r"\bfarm", r"puppy", r"kitten", r"\bcats?\b", r"\bdogs?\b", r"\bduck", r"\bpigs?\b", r"\bcows?\b", r"monkey", r"chick", r"\bfrogs?\b", r"dinosaur", r"shark", r"dolphin", r"\blions?\b", r"\bbears?\b", r"elephant", r"butterfly", r"\bbees?\b", r"\bbirds?\b", r"\bfish", r"rabbit", r"penguin", r"\bwhales?\b", r"turtle", r"bunny", r"\bgoats?\b", r"giraffe", r"tiger", r"zebra", r"\bcamel", r"\bcrocodile", r"jellyfish", r"ladybug", r"octopus", r"hippo"]),
+    ("动物 / Animals", [r"animal", r"\bzoo\b", r"\bfarm", r"puppy", r"kitten", r"\bcats?\b", r"\bdogs?\b", r"\bduck", r"\bpigs?\b", r"\bcows?\b", r"monkey", r"chick", r"\bfrogs?\b", r"dinosaur", r"shark", r"dolphin", r"\blions?\b", r"\bbears?\b", r"elephant", r"butterfly", r"\bbees?\b", r"\bbirds?\b", r"\bfish", r"rabbit", r"penguin", r"\bwhales?\b", r"turtle", r"bunny", r"\bgoats?\b", r"giraffe", r"tiger", r"zebra", r"\bcamel", r"\bcrocodile", r"jellyfish", r"ladybug", r"octopus", r"hippo", r"spider", r"mouse", r"mice", r"birdie", r"froggy", r"worm", r"bugs?", r"ants?", r"cricket", r"mole", r"fox", r"deer", r"pony", r"donkey", r"goose", r"hen", r"rooster"]),
     ("食物与饮品 / Food & Drink", [r"pizza", r"spaghetti", r"yogurt", r"cookie", r"muffin", r"cake", r"apple", r"banana", r"ice cream", r"hungry", r"\beat\b", r"\bdrink", r"snack", r"lunch", r"breakfast", r"dinner", r"carrot", r"potato", r"soup", r"bread", r"\bmilk\b", r"juice", r"pasta", r"pancake", r"popcorn", r"candy", r"\bfood", r"yummy", r"peanut butter", r"\bjelly\b", r"lasagna", r"milkshake"]),
     ("身体与健康 / Body & Health", [r"brush your teeth", r"wash (your|our|my) (face|hands)", r"healthy", r"\bteeth\b", r"toothbrush", r"\bbody\b", r"head.{0,3}shoulders", r"\bfingers?\b", r"\btoes?\b", r"tummy", r"\beyes?\b", r"\bnose\b", r"\bmouth\b", r"sneeze", r"achoo", r"\bdoctor", r"dentist", r"\bbath\b", r"\bface\b", r"\bheart\b", r"loose tooth"]),
     ("穿衣与自理 / Clothing & Self-care", [r"\bboots?\b", r"\bshoes?\b", r"\bhats?\b", r"shirt", r"\bcoat\b", r"\bdress\b", r"put on", r"take off", r"jacket", r"\bsocks?\b", r"pants", r"scarf", r"mitten", r"get dressed", r"potty", r"clean ?up", r"\btidy", r"good habits?"]),
@@ -36,13 +36,15 @@ THEME_RULES = [
     ("游戏与玩具 / Play & Toys", [r"\bbubbles?\b", r"rock scissors paper", r"hide and seek", r"\btoys?\b", r"\bplay", r"\bgames?\b", r"puzzle", r"\bball\b", r"balloon", r"\bkite\b", r"playground"]),
     ("节奏律动与舞蹈 / Rhythm & Movement", [r"\bmove\b", r"action song", r"\bdance", r"\bjump", r"\bclap", r"stomp", r"\bshake\b", r"line up", r"\bmarch", r"\bhop\b", r"freeze", r"walking walking", r"wiggle", r"follow me", r"roly poly"]),
     ("职业与梦想 / Jobs & Dreams", [r"when i grow up", r"firefight", r"\bpolice", r"astronaut", r"\bpilot", r"\bchef\b", r"\bfarmer", r"engineer", r"scientist", r"\bjobs?\b"]),
-    ("交通工具 / Vehicles", [r"\bbus\b", r"\bcars?\b", r"\btrains?\b", r"\btrucks?\b", r"\bplanes?\b", r"\bboats?\b", r"\bbikes?\b", r"ambulance", r"fire truck", r"tractor", r"helicopter", r"\bwheels?\b", r"vroom"]),
+    ("交通工具 / Vehicles", [r"\bbus\b", r"\bcars?\b", r"\btrains?\b", r"\btrucks?\b", r"\bplanes?\b", r"\bboats?\b", r"\bbikes?\b", r"ambulance", r"fire truck", r"tractor", r"helicopter", r"\bwheels?\b", r"vroom", r"bicycle", r"\bscooter"]),
     ("天气与自然 / Weather & Nature", [r"weather", r"\brain", r"\bsnow", r"\bwind", r"\bsun(ny)?\b", r"\bcloud", r"\btrees?\b", r"\bflowers?\b", r"\bseasons?\b", r"\bspring\b", r"\bsummer\b", r"\bwinter\b", r"\bautumn", r"rainbow", r"\bforest", r"\bmountain", r"\bgrass", r"\bnature"]),
     ("太空与想象 / Space & Imagination", [r"\bspace\b", r"\bplanets?\b", r"rocket", r"\bmoon\b", r"\bstars?\b", r"\balien", r"\bmagic", r"\bdragon", r"unicorn", r"\bimagine", r"\bdream"]),
+    ("旅行与户外 / Travel & Outdoor", [r"\btrip\b", r"camping", r"road trip", r"adventure", r"pack your bag", r"go! go! go!", r"hike", r"\boutside\b", r"\bwalk", r"explore"]),
+    ("学校与文具 / School & Supplies", [r"school supplies", r"blackboard", r"crayon", r"\bpencil", r"back to school", r"\bclassroom\b", r"\bbook", r"\bdraw", r"\bpaint", r"\bpaper\b"]),
     ("农场与海洋 / Farm & Ocean", [r"\bocean\b", r"\bsea\b", r"underwater", r"safari", r"\bjungle", r"\bbeach\b"]),
     ("课堂与教学 / Classroom", [r"classroom", r"teaching", r"\blesson", r"sit down", r"story time", r"\bteacher", r"preschool", r"\blearn"]),
     ("睡前安抚 / Bedtime & Lullaby", [r"lullaby", r"bedtime", r"good ?night", r"\bsleep", r"\bhush\b", r"rock a bye", r"nighty night"]),
-    ("经典童谣 / Classic Nursery Rhymes", [r"twinkle", r"\bbingo\b", r"humpty", r"dickory", r"old macdonald", r"\bitsy", r"eensy", r"row row", r"hickory", r"baa baa", r"mary had", r"jack (and|&) jill", r"hokey pokey", r"wheel on the bus", r"this is the way", r"rain rain go away", r"down by the bay", r"alice the camel", r"looby loo", r"pinocchio"]),
+    ("经典童谣 / Classic Nursery Rhymes", [r"twinkle", r"\bbingo\b", r"humpty", r"dickory", r"old macdonald", r"\bitsy", r"eensy", r"row row", r"hickory", r"baa baa", r"mary had", r"jack (and|&) jill", r"hokey pokey", r"wheel on the bus", r"this is the way", r"rain rain go away", r"down by the bay", r"alice the camel", r"looby loo", r"pinocchio", r"hot cross buns", r"toodly", r"little robin", r"\bbeanbag", r"down on the plain", r"as quiet as"]),
     ("Top 20 合集", [r"top ?20", r"\bbest of\b", r"\bcollection", r"\bcompilation", r"giant", r"\bwrapped\b", r"anniversary"]),
 ]
 
@@ -75,8 +77,13 @@ def classify(title, tags, duration):
     is_comp = bool(COMPILE_RE.search(title or "")) or (duration and duration >= DURATION_LONG)
     if is_comp and not any("Top 20" in o for o in out):
         out.insert(0, "Top 20 合集")
-    MARK = ("Top 20 合集", "其他 / Other")
-    primary = next((o for o in out if o not in MARK), "其他 / Other")
+    # ★ 主分类排除 "Top 20 合集" 这个标记型分类，让主题更纯。
+    #   但若一个视频只命中合集标记（如 "Best of 2025"），主分类应回落到 "Top 20 合集"
+    #   而不是 "其他" —— 否则纯合集视频会被误报成未分类（实测 85 个里有 40 个是这种情况）。
+    MARK = ("其他 / Other",)
+    primary = next((o for o in out if o not in MARK and o != "Top 20 合集"), None)
+    if not primary:
+        primary = "Top 20 合集" if is_comp else "其他 / Other"
     return "、".join(out), is_comp, primary
 
 
