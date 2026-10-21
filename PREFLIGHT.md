@@ -62,6 +62,7 @@ yt-dlp -F "https://www.youtube.com/watch?v=4XLQpRI_wOQ"
 | 只看到 360p（format 18）| 换节点、换 IP | **重启 POT 服务**（这才是 90% 的真因） |
 | B站高清拿不到 | — | 需 `SESSDATA` cookie；否则只有 288p |
 | 微信视频号 | — | **无解**，yt-dlp 无 extractor |
+| 重下老视频只给 360-720p | 换节点、重试 | **源站高清转码已不可用**（实测 3 个原 1080p 视频现只给 720p/360p/480p）。保持原文件，别降清 |
 
 ---
 
