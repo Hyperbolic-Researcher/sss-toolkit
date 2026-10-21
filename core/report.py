@@ -87,6 +87,57 @@ def classify(title, tags, duration):
     return "、".join(out), is_comp, primary
 
 
+def load_meta_tsv(path):
+    """读取元数据：id|upload_date|view_count|like_count|duration|categories|title|tags
+
+    ★ 坑：YouTube 标题里常含 "|"（如 "This Is The Way | Kids Songs | Super Simple"），
+      简单 split("|") 会把标题切断，导致 categories/tags 丢失。
+      这里用"左定长 6 段 + 右侧倒推 tags"的方式，绕开标题含竖线的问题。
+    """
+    import re as _re
+    meta = {}
+    if not os.path.exists(path):
+        return meta
+
+    HEAD = _re.compile(r"^([A-Za-z0-9_-]{11})\|([^|]*)\|([^|]*)\|([^|]*)\|([^|]*)\|(\[[^\]]*\])")
+
+    def _fmt_date(d):
+        d = (d or "").strip()
+        return "%s-%s-%s" % (d[:4], d[4:6], d[6:8]) if len(d) == 8 and d.isdigit() else ""
+
+    def _clean_list(t):
+        t = (t or "").strip()
+        if t.startswith("["):
+            try:
+                v = eval(t, {"__builtins__": {}}, {})
+                return ", ".join(str(x) for x in v) if isinstance(v, (list, tuple)) else str(v)
+            except Exception:
+                return t.strip("[]").replace("'", "")
+        return "" if t in ("NA", "None", "") else t
+
+    for line in open(path, encoding="utf-8", errors="replace"):
+        line = line.rstrip("\r\n")
+        m = HEAD.match(line)
+        if not m:
+            continue
+        vid, upd, views, likes, dur, cats = m.groups()
+        rest = line[m.end():].lstrip("|")      # 剩下 title|tags
+        i = rest.rfind("|[")
+        if i > 0:
+            title, tags = rest[:i], rest[i + 1:]
+        else:
+            title, tags = rest, ""
+        meta[vid] = {
+            "upload_date": _fmt_date(upd),
+            "upload_year": upd[:4] if len(upd) >= 4 else "",
+            "like_count": likes if likes not in ("NA", "None", "") else "",
+            "categories": _clean_list(cats),
+            "tags": _clean_list(tags),
+            "title_full": title,
+        }
+    return meta
+
+
 def build(cfg):
     out_dir = cfg["output_dir"]
     videos = scan_mod.read_list(out_dir)
@@ -103,6 +154,23 @@ def build(cfg):
         except Exception:
             pass
 
+    # 元数据文件按优先级查找（新流程写 .state/meta.txt，历史项目可能是 ss_metadata.tsv）
+    _root = os.path.dirname(os.path.abspath(__file__))          # core/
+    _proj = os.path.dirname(_root)                             # sss-toolkit/
+    _cands = [
+        os.path.join(common.STATE_DIR, "meta.txt"),
+        os.path.join(_proj, "ss_metadata.tsv"),
+        os.path.join(out_dir, "meta.txt"),
+        os.path.join(os.path.dirname(_proj), ".workbuddy", "ss_metadata.tsv"),
+    ]
+    meta = {}
+    for _c in _cands:
+        if os.path.exists(_c):
+            meta = load_meta_tsv(_c)
+            if meta:
+                common.log("元数据来源: %s（%d 条）" % (_c, len(meta)))
+                break
+
     # 文件索引
     files = {}
     for f in glob.glob(os.path.join(out_dir, "*.mp4")):
@@ -112,6 +180,17 @@ def build(cfg):
         m = re.search(r"\[([A-Za-z0-9_-]{11})\]\.mp4$", b)
         if m:
             files[m.group(1)] = f
+
+    # 2025 热门：2025 年上传的里面播放量前 20
+    _v2025 = []
+    for _v in videos:
+        _m = meta.get(_v[0], {})
+        if _m.get("upload_year") == "2025":
+            try:
+                _v2025.append((int(float(_v[2] or 0)), _v[0]))
+            except ValueError:
+                pass
+    top20_2025 = {vid for _, vid in sorted(_v2025, reverse=True)[:20]}
 
     rows = []
     for i, (vid, dur_s, views, title) in enumerate(videos, 1):
@@ -157,12 +236,20 @@ def build(cfg):
             "视频编码": info.get("vcodec", ""),
             "音频编码": ac,
             "文件大小MB": size_mb,
+            "音频码率kbps": info.get("abr", ""),
             "时长秒": round(dur, 1),
             "时长": "%d:%02d" % (int(dur)//60, int(dur) % 60) if dur else "",
             "播放量": vw,
+            "点赞数": meta.get(vid, {}).get("like_count", ""),
+            "上传日期": meta.get(vid, {}).get("upload_date", ""),
+            "上传年份": meta.get(vid, {}).get("upload_year", ""),
+            "2025上传": "是" if meta.get(vid, {}).get("upload_year") == "2025" else "",
+            "2025热门": "是" if vid in top20_2025 else "",
             "主分类": primary,
             "分类主题": theme,
             "是否合集": "是" if is_comp else "否",
+            "官方分类": meta.get(vid, {}).get("categories", ""),
+            "标签": meta.get(vid, {}).get("tags", ""),
             # ★ 无歌词时不留空，明确标注，避免看起来像数据缺失
             "难度等级": lv.get("level_cn", "无官方歌词") if lv.get("has_lyrics") else "无官方歌词",
             "难度分": lv.get("difficulty_score", "") if lv.get("has_lyrics") else "",
