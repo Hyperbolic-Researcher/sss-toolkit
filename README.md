@@ -110,6 +110,44 @@ python sss.py report     # 4. 生成 Excel
 
 ---
 
+---
+
+## 手机端使用
+
+下载必须跑在电脑上（需要代理、硬盘、算力），**手机只做遥控器**。
+
+```
+手机（遥控器） ──WiFi──> 电脑（干活） ──代理──> YouTube
+                          ↓
+                     E 盘存视频
+```
+
+### 在家（同 WiFi）
+
+1. 双击 `启动网页界面_手机版.bat`
+2. 黑窗口会打印一个地址，例如 `http://192.168.0.107:8765/`
+3. 手机连**同一 WiFi**，浏览器打开这个地址
+4. 建议"添加到主屏幕"，以后像 App 一样点开
+
+> 窗口不能关，关了服务就停。
+
+### 不在家
+
+用 [Tailscale](https://tailscale.com/download)（推荐）或 Cloudflare Tunnel 做内网穿透。
+详细步骤见 `docs/手机端使用.md`。
+
+### 安全提醒
+
+`--lan` 模式会把服务暴露给局域网内所有设备。家用 WiFi 一般可信；
+若要暴露到公网，务必先设口令：
+
+```bash
+set SSS_TOKEN=你的口令
+python webui.py --lan
+```
+访问时带 `?k=你的口令`。
+
+
 ## 常见问题
 
 **Q：下载报 `Sign in to confirm you're not a bot`**
