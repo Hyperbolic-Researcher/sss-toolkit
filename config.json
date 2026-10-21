@@ -1,0 +1,48 @@
+{
+  "_说明": "改这里就能换频道/换语种，不用改代码。所有路径支持中文。",
+
+  "output_dir": "E:/MediaLibrary",
+  "channel_url": "https://www.youtube.com/@SuperSimpleSongs/videos",
+
+  "quality": {
+    "_说明": "画质策略。strict=只下最高画质，拿不到就跳过（绝不降清）；任何情况下都不会回退到 360p",
+    "mode": "strict",
+    "min_height": 1080,
+    "prefer_audio": "opus"
+  },
+
+  "network": {
+    "proxy": "http://127.0.0.1:7892",
+    "proxy_enabled": true,
+    "pot_server": "http://127.0.0.1:4416",
+    "deno_path": "",
+    "aria2_path": "",
+    "concurrency": 16,
+    "sleep_between_videos": 5
+  },
+
+  "lyrics": {
+    "enabled": true,
+    "languages": ["en"],
+    "manual_only": true,
+    "_manual_only说明": "true=只下官方手动字幕（质量高）；false=允许自动字幕（质量差、有噪声）",
+    "sub_dir_name": "lyrics"
+  },
+
+  "report": {
+    "enabled": true,
+    "filename": "媒体库清单.xlsx",
+    "calc_difficulty": true
+  },
+
+  "advanced": {
+    "_说明": "以下参数是踩坑后定的，非必要别改",
+    "keep_video": true,
+    "_keep_video说明": "合并后保留中间流文件。在某些沙箱环境里，进程内删除满 50 个文件会被拦截卡死",
+    "player_client": "mweb,tv,web,ios",
+    "_player_client说明": "YouTube 会对单 client 开启 SABR-only 实验导致取不到流，多 client 组合可规避",
+    "max_retries": 3,
+    "stale_limit": 8,
+    "_stale_limit说明": "连续多少批零新增就停机，防止 IP 被封后空烧配额"
+  }
+}

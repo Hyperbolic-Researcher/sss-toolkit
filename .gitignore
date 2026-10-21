@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.state/
+logs/
+tools/
+config.local.json
+.DS_Store
+Thumbs.db
+*.xlsx
+*.mp4
+*.srt
+*.lrc
