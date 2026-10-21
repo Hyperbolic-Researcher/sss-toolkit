@@ -39,7 +39,7 @@ def _run_task(task, cfg):
     _STOP["flag"] = False
     try:
         if task == "check":
-            good, reason = dl.probe_health(cfg)
+            good, reason, _fid = dl.probe_health(cfg)
             common.log("体检：%s" % reason, "OK" if good else "ERROR")
         elif task == "scan":
             scan_mod.scan(cfg)

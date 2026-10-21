@@ -119,12 +119,23 @@ def build_cmd(cfg, url, out_dir, batch_log):
 
 
 # ---------------- 封禁探测 ----------------
-def probe_health(cfg, probe_id="JV-D_K4drsA"):
-    """用已知可下的视频探测通道健康度。返回 (ok, reason)"""
-    args = [common.py(), "-m", "yt_dlp", "--simulate", "--no-warnings",
-            "-f", "bestvideo+bestaudio",
-            "--socket-timeout", "25", "--extractor-retries", "1"]
+def probe_health(cfg, probe_id="4XLQpRI_wOQ"):
+    """用已知有 1080p 的视频探测通道质量。
+
+    ★ 重要修正：不能只看"能下载成功"就当健康。
+      format 18（360p）也能下载成功，但它意味着节点被降级（机房 IP 常见）。
+      必须解析实际拿到的格式 ID，判断是否 >= min_height。
+      返回 (ok, reason, fmt_id)。
+
+    判断依据（实测）：
+      399/401/137 等 = 高清视频流，正常
+      18            = 360p 单文件，节点被降级
+    """
     net = cfg["network"]; adv = cfg["advanced"]
+    args = [common.py(), "-m", "yt_dlp", "--no-warnings",
+            "--print", "%(format_id)s",
+            "-f", "bestvideo[height>=720]+bestaudio/bestvideo+bestaudio",
+            "--socket-timeout", "25", "--extractor-retries", "1"]
     if net.get("proxy_enabled") and net.get("proxy"):
         args += ["--proxy", net["proxy"]]
     deno = common.find_deno(cfg)
@@ -135,24 +146,52 @@ def probe_health(cfg, probe_id="JV-D_K4drsA"):
         extra += ";youtubepot-bgutilhttp:base_url=" + net["pot_server"]
     args += ["--extractor-args", extra,
              "https://www.youtube.com/watch?v=" + probe_id]
+
     try:
         r = subprocess.run(args, capture_output=True, text=True,
                            env=common.env_no_proxy(), timeout=90,
                            encoding="utf-8", errors="replace")
+        out = (r.stdout or "").strip()
         t = (r.stdout or "") + (r.stderr or "")
     except Exception as e:
-        return False, "探测超时/异常: %s" % str(e)[:60]
+        return False, "探测超时/异常: %s" % str(e)[:60], ""
+
     if "not a bot" in t:
-        return False, "IP 已被 YouTube 封禁（所有 client 都被拦）"
+        return False, "IP 已被 YouTube 封禁（配额耗尽，冷却无效，需换 IP）", ""
     if "UNEXPECTED_EOF" in t:
-        return False, "代理链路异常（SSL EOF），检查节点是否存活"
+        return False, "代理链路异常（SSL EOF），检查节点是否存活", ""
     if "needs to be reloaded" in t:
-        return False, "YouTube 限流中（The page needs to be reloaded），稍后重试或换 IP"
+        return False, "YouTube 限流中（The page needs to be reloaded）", ""
     if "Requested format" in t:
-        return False, "取不到可用格式（可能是 SABR-only 或配额降级）"
-    if "Downloading 1 format" in t or "format(s)" in t:
-        return True, "通道正常"
-    return False, "未知状态: " + t.strip().split("\n")[-1][:80]
+        return False, "取不到可用格式（SABR-only 或配额降级）", ""
+
+    fid = out.split("\n")[-1].strip() if out else ""
+    if not fid:
+        return False, "未解析到格式 ID", ""
+
+    # 360p 特征：只有 format 18
+    parts = [x for x in re.split(r"[+\s]", fid) if x]
+    video_ids = [x for x in parts if x.isdigit() and int(x) != 140 and int(x) != 251]
+    if video_ids and all(v == "18" for v in video_ids):
+        return False, "节点被降级：只提供 360p（format 18），需换住宅 IP", fid
+    return True, "通道正常（格式 %s）" % fid, fid
+
+
+def check_pot(cfg):
+    """检查 POT token 服务是否活着。无它则字幕/格式解析会异常。"""
+    url = (cfg.get("network", {}) or {}).get("pot_server") or ""
+    if not url:
+        return True, "未配置（跳过）"
+    m = re.match(r"https?://([^:/]+):?(\d+)?", url)
+    if not m:
+        return True, "地址无法解析（跳过）"
+    host = m.group(1); port = int(m.group(2) or 80)
+    import socket
+    try:
+        with socket.create_connection((host, port), timeout=3):
+            return True, "在线（%s:%d）" % (host, port)
+    except Exception:
+        return False, "未响应 —— 需重启 POT server（会话重启会杀掉它）"
 
 
 # ---------------- 画质校验 ----------------
@@ -242,7 +281,7 @@ def download(cfg, limit_batch=24, max_rounds=0, stop_flag=None, progress_cb=None
         rounds += 1
         stats["rounds"] = rounds
 
-        ok_health, reason = probe_health(cfg)
+        ok_health, reason, _fid = probe_health(cfg)
         if not ok_health:
             common.log("通道不可用：%s → 等待 5 分钟再试" % reason, "WARN")
             common.write_state(blocked=reason)

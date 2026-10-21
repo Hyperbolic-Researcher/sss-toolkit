@@ -20,60 +20,62 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from core import common, scan as scan_mod, download as dl, lyrics as lyr, report as rep
 
 
-def cmd_check(cfg):
-    print("=" * 56)
-    print("环境体检")
-    print("=" * 56)
-    ok = True
+def cmd_check(cfg, quick=False):
+    """环境体检。quick=True 时只输出关键行（供巡查，约 150 tokens）。"""
+    rows = []
 
-    print("\n[1/5] Python: %s" % sys.version.split()[0])
+    # 1) POT 服务
+    pot_ok, pot_msg = dl.check_pot(cfg)
+    rows.append(("POT服务", pot_ok, pot_msg))
 
-    print("\n[2/5] 工具链")
-    for name, path, required in (
-        ("ffmpeg", common.find_ffmpeg(), True),
-        ("deno", common.find_deno(cfg), False),
-        ("aria2c", common.find_aria2(cfg), False),
-    ):
-        mark = "OK " if path else ("-- " if not required else "!! ")
-        print("  %s%-8s %s" % (mark, name, path or "未找到"))
-        if not path and required:
-            ok = False
-    print("  （deno/aria2 缺失不影响基本下载，但速度与成功率会下降）")
+    # 2) 工具链
+    ff = common.find_ffmpeg(); deno = common.find_deno(cfg); aria = common.find_aria2(cfg)
+    rows.append(("ffmpeg", bool(ff), "OK" if ff else "缺失（合并必需）"))
+    if not quick:
+        rows.append(("deno", bool(deno), deno or "缺失（影响 JS challenge）"))
+        rows.append(("aria2c", bool(aria), "OK" if aria else "缺失（影响速度）"))
 
-    print("\n[3/5] Python 依赖")
-    try:
-        import yt_dlp  # noqa
-        print("  OK  yt-dlp")
-    except ImportError:
-        print("  !!  yt-dlp 未安装：pip install -U yt-dlp")
-        ok = False
+    # 3) Python 依赖
     try:
         import openpyxl  # noqa
-        print("  OK  openpyxl")
+        rows.append(("openpyxl", True, "OK"))
     except ImportError:
-        print("  !!  openpyxl 未安装：pip install openpyxl（生成 Excel 需要）")
+        rows.append(("openpyxl", False, "缺失：pip install openpyxl"))
 
-    print("\n[4/5] 输出目录")
+    # 4) 输出目录
     od = cfg["output_dir"]
     try:
         os.makedirs(od, exist_ok=True)
-        t = os.path.join(od, ".write_test")
-        open(t, "w").write("1"); os.remove(t)
-        print("  OK  %s（可写）" % od)
+        t = os.path.join(od, ".wtest"); open(t, "w").write("1"); os.remove(t)
+        rows.append(("输出目录", True, od))
     except Exception as e:
-        print("  !!  %s 不可写: %s" % (od, e))
-        ok = False
+        rows.append(("输出目录", False, "%s 不可写: %s" % (od, str(e)[:40])))
 
-    print("\n[5/5] 通道健康（真实取流测试）")
-    good, reason = dl.probe_health(cfg)
-    print("  %s  %s" % ("OK " if good else "!! ", reason))
-    if not good:
-        print("     → 检查代理是否开启 / 节点是否存活 / 是否需要换 IP")
-        ok = False
+    # 5) 通道质量（关键：能识破 360p 降级）
+    ok_h, msg_h, fid = dl.probe_health(cfg)
+    rows.append(("节点质量", ok_h, msg_h))
 
-    print("\n" + "=" * 56)
-    print("结论：" + ("全部通过，可以开始" if ok else "有问题，先按上面提示处理"))
-    return 0 if ok else 1
+    all_ok = all(r[1] for r in rows)
+
+    if quick:
+        # 极简输出：每行一条，最后一行结论
+        for name, ok, msg in rows:
+            print("%-10s %s  %s" % (name, "OK  " if ok else "FAIL", msg))
+        print("→ %s" % ("PASS" if all_ok else "FAIL：先处理上面 FAIL 项，别急着开跑"))
+        return 0 if all_ok else 1
+
+    # 详细模式
+    print("=" * 58)
+    print("环境体检")
+    print("=" * 58)
+    print("\nPython: %s" % sys.version.split()[0])
+    for name, ok, msg in rows:
+        print("  %s %-10s %s" % ("[OK]  " if ok else "[FAIL]", name, msg))
+    print("\n" + "=" * 58)
+    print("结论：" + ("全部通过，可以开始" if all_ok else "有问题，先按上面提示处理"))
+    if not all_ok:
+        print("\n提示：详见 PREFLIGHT.md（开工前必读）")
+    return 0 if all_ok else 1
 
 
 def cmd_scan(cfg, args):
@@ -109,13 +111,14 @@ def main():
     ap.add_argument("--limit", type=int, default=0, help="只处理前 N 个（调试用）")
     ap.add_argument("--batch", type=int, default=24, help="每批数量")
     ap.add_argument("--rounds", type=int, default=0, help="最多跑几轮（0=不限制）")
+    ap.add_argument("--quick", action="store_true", help="体检只输出关键行（巡查用，省 token）")
     args = ap.parse_args()
 
     cfg = common.load_config()
     cmd = args.command
 
     if cmd == "check":
-        return cmd_check(cfg)
+        return cmd_check(cfg, quick=args.quick)
     if cmd == "scan":
         return cmd_scan(cfg, args)
     if cmd == "download":
