@@ -13,6 +13,24 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from core import common, scan as scan_mod, download as dl, lyrics as lyr, report as rep
 
 PORT = int(os.environ.get("SSS_PORT", "8765"))
+# ★ 手机访问：默认只监听本机；加 --lan 参数则监听所有网卡，手机连同一 WiFi 即可访问
+LAN = "--lan" in sys.argv
+HOST = "0.0.0.0" if LAN else "127.0.0.1"
+# 可选口令：设置 SSS_TOKEN 环境变量后，访问需带 ?k=口令（家用 WiFi 一般不需要）
+TOKEN = os.environ.get("SSS_TOKEN", "").strip()
+
+
+def lan_ip():
+    """取本机局域网 IP（不实际发包）"""
+    import socket
+    try:
+        s_ = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s_.connect(("8.8.8.8", 80))
+        ip = s_.getsockname()[0]
+        s_.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
 _STOP = {"flag": False}
 _WORKER = {"thread": None, "task": ""}
 
@@ -66,8 +84,16 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _auth_ok(self, q):
+        if not TOKEN:
+            return True
+        return (q.get("k") or [""])[0] == TOKEN
+
     def do_GET(self):
         u = urlparse(self.path)
+        q = parse_qs(u.query)
+        if not self._auth_ok(q):
+            return self._json({"error": "需要口令，请在网址后加 ?k=你的口令"}, 401)
         if u.path in ("/", "/index.html"):
             return self._html(INDEX_HTML)
         if u.path == "/api/status":
@@ -103,6 +129,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         u = urlparse(self.path)
         q = parse_qs(u.query)
+        if not self._auth_ok(q):
+            return self._json({"error": "需要口令"}, 401)
         if u.path == "/api/start":
             if _WORKER["thread"] is not None:
                 return self._json({"error": "已有任务在运行"}, 409)
@@ -245,14 +273,25 @@ def main():
     print("频道资料库 · 本地控制台")
     print("=" * 56)
     print("输出目录：%s" % cfg["output_dir"])
-    print("浏览器打开：http://127.0.0.1:%d" % PORT)
+    print("本机访问：http://127.0.0.1:%d" % PORT)
+    if LAN:
+        ip = lan_ip()
+        suffix = ("/?k=" + TOKEN) if TOKEN else "/"
+        print("")
+        print("=" * 56)
+        print("  手机访问（需与电脑连同一个 WiFi）")
+        print("  http://%s:%d%s" % (ip, PORT, suffix))
+        print("=" * 56)
+        print("  把这个地址在手机浏览器打开，建议添加到主屏幕")
+    else:
+        print("（如需手机访问，请用 启动网页界面_手机版.bat 启动）")
     print("关闭窗口即停止服务（Ctrl+C）")
     print("=" * 56)
     try:
         webbrowser.open("http://127.0.0.1:%d" % PORT)
     except Exception:
         pass
-    srv = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+    srv = ThreadingHTTPServer((HOST, PORT), Handler)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
