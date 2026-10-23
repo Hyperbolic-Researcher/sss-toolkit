@@ -172,14 +172,24 @@ def _worker(cfg, vid, dest_dir, min_height):
         adv = cfg["advanced"]
         minh = int(min_height or cfg["quality"].get("min_height") or 1080)
 
-        # ★ 与批量下载的区别：单视频用户要的就是这一个文件，拿不到高清也该下到，
-        #   所以末尾保留 /best 兜底。但完成后必须校验实际分辨率并如实告知
-        #   （批量下载绝不允许兜底，那会让整库混入 360p）。
+        # ★★ 音频必须优先 AAC(140)，不要 Opus(251)
+        #  实测：AV1 + Opus 的 MP4（major_brand=isom）在 Windows 自带播放器里
+        #  经常打不开 —— Opus 在 MP4 容器中的支持很差。
+        #  AAC 是通用格式，任何设备/播放器/剪辑软件都认。
+        #  视频仍用 AV1（同画质体积只有 H.264 的 1/3），只是音频换成 AAC。
+        #  体积几乎不变：Opus 138k vs AAC 128k。
+        # ★ 注意：每个候选必须完整写成「视频+音频」，
+        #   不能写成 bv+A/bv+A 而让 A 里再带 "/" —— 那样会解析出只有音频的候选。
+        H = "bestvideo[height>=%d]" % minh if minh >= 1080 else "bestvideo"
+        M7 = "bestvideo[height>=720]"
+        A1, A2 = "bestaudio[ext=m4a]", "bestaudio[acodec^=mp4a]"
+        cands = []
         if minh >= 1080:
-            fmt = ("bestvideo[height>=%d]+bestaudio/bestvideo[height>=720]+bestaudio/"
-                   "bestvideo+bestaudio/best" % minh)
-        else:
-            fmt = "bestvideo[ext=mp4]+bestaudio/bestvideo+bestaudio/best"
+            cands += ["%s+%s" % (H, A1), "%s+%s" % (H, A2),
+                      "%s+%s" % (M7, A1), "%s+%s" % (M7, A2)]
+        cands += ["bestvideo+%s" % A1, "bestvideo+%s" % A2,
+                  "bestvideo+bestaudio", "best"]
+        fmt = "/".join(cands)
 
         args = base_args(cfg) + [
             "-f", fmt,

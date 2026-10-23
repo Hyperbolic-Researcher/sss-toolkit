@@ -126,6 +126,10 @@ python sss.py report     # 4. 生成 Excel
 - `https://www.youtube.com/shorts/XXXXXXXXXXX`
 - 也可以只粘贴 11 位视频 ID
 
+**音频格式**：强制优先 AAC（`bestaudio[ext=m4a]`），不用 Opus。
+原因：AV1 + Opus 的 MP4 在 Windows 自带播放器里经常打不开——Opus 在 MP4 容器中支持很差。
+视频仍保留 AV1（同画质体积只有 H.264 的 1/3），只有音频换成 AAC，体积几乎不变。
+
 **和批量下载的区别**：单视频允许画质兜底（`/best`）。
 用户要的就是这一个文件，拿不到 1080p 也该下到 720p——**但完成后会明确告知实际分辨率**，例如：
 

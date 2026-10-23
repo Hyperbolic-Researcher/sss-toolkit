@@ -5,7 +5,7 @@
 启动后浏览器访问 http://127.0.0.1:8765 ，点按钮即可。
 任务在后台线程跑，页面实时显示进度与日志。
 """
-import os, sys, json, threading, time, webbrowser
+import os, sys, json, threading, time, webbrowser, subprocess
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
@@ -123,12 +123,27 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(sg.probe(cfg, url))
         if u.path == "/api/dl_status":
             return self._json(sg.task_state())
+        if u.path == "/api/pick_folder":
+            """弹系统原生目录选择框（独立子进程跑 tkinter，避免线程内崩溃）"""
+            init = (q.get("init") or [""])[0]
+            picker = os.path.join(os.path.dirname(os.path.abspath(__file__)), "core", "folder_picker.py")
+            try:
+                r = subprocess.run([sys.executable, picker, init],
+                                   capture_output=True, text=True, timeout=300,
+                                   encoding="utf-8", errors="replace")
+                path = (r.stdout or "").strip()
+                return self._json({"ok": bool(path), "path": path})
+            except Exception as e:
+                return self._json({"ok": False, "error": str(e)[:100]})
         if u.path == "/api/open_folder":
             path = (q.get("path") or [""])[0]
             try:
                 if path and os.path.exists(path):
-                    d = path if os.path.isdir(path) else os.path.dirname(path)
-                    os.startfile(d)
+                    if os.path.isfile(path):
+                        # ★ 用 /select 打开所在文件夹并选中该文件，而不是只打开目录
+                        subprocess.Popen(["explorer", "/select," + os.path.normpath(path)])
+                    else:
+                        os.startfile(path)
                     return self._json({"ok": True})
                 return self._json({"ok": False, "error": "路径不存在"})
             except Exception as e:
@@ -237,11 +252,12 @@ height:340px;overflow-y:auto;font:12px/1.65 ui-monospace,Consolas,monospace;whit
     <div id="vTitle" style="font-size:14px;font-weight:600;margin-bottom:6px"></div>
     <div id="vMeta" style="color:var(--dim);font-size:12.5px;margin-bottom:12px"></div>
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
-      <span style="color:var(--dim);font-size:12.5px">保存到</span>
-      <input id="dlDest" list="destList" style="flex:1;min-width:240px;background:#0b0e13;
+      <span style="color:var(--dim);font-size:12.5px;flex:none">保存到</span>
+      <input id="dlDest" readonly style="flex:1;min-width:240px;background:#0b0e13;
         border:1px solid var(--line);color:var(--txt);border-radius:6px;padding:7px 10px;
-        font-size:12.5px;outline:none" />
-      <datalist id="destList"></datalist>
+        font-size:12.5px;outline:none;cursor:pointer" onclick="pickFolder()"
+        title="点击选择目录" />
+      <button class="ghost" onclick="pickFolder()" style="flex:none;font-size:12.5px;padding:7px 14px">浏览…</button>
     </div>
     <div style="display:flex;gap:8px">
       <button id="btnDl" onclick="startDl()" style="flex:1">开始下载</button>
@@ -422,6 +438,23 @@ async function stopDl(){
 function openFile(){
   if(lastFile) fetch('/api/open_folder?path='+encodeURIComponent(lastFile));
 }
+async function pickFolder(){
+  const cur = $('dlDest').value.trim();
+  $('dlDest').value = '选取中…';
+  try{
+    const r = await (await fetch('/api/pick_folder?init='+encodeURIComponent(cur))).json();
+    if(r.ok && r.path){
+      $('dlDest').value = r.path;
+      lastDest = r.path;
+    }else{
+      $('dlDest').value = cur || '';
+      if(r.error) $('probeMsg').innerHTML = '<span style="color:var(--err)">'+esc(r.error)+'</span>';
+    }
+  }catch(e){
+    $('dlDest').value = cur || '';
+  }
+}
+
 function openDest(){
   const d = $('dlDest').value.trim() || lastDest;
   if(d) fetch('/api/open_folder?path='+encodeURIComponent(d));
