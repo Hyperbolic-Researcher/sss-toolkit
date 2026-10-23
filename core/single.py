@@ -146,8 +146,15 @@ def safe_name(s, limit=120):
     return s[:limit] or "video"
 
 
-def start_download(cfg, url, dest_dir, min_height=None):
-    """启动后台下载。返回 (ok, msg)"""
+def start_download(cfg, url, dest_dir, min_height=None, outputs=None):
+    """启动后台下载。
+
+    outputs: 可多选，取值 "video"(原视频) / "noaudio"(无音轨) / "audio"(音频)
+             默认 ["video"]
+    返回 (ok, msg)
+    """
+    outputs = outputs or ["video"]
+    outputs = [o for o in outputs if o in ("video", "noaudio", "audio")] or ["video"]
     with _TASK_LOCK:
         if _TASK["running"]:
             return False, "已有下载任务在进行，请等它完成"
@@ -158,47 +165,64 @@ def start_download(cfg, url, dest_dir, min_height=None):
             "running": True, "url": url, "title": "", "dest": dest_dir,
             "percent": 0.0, "speed": "", "eta": "", "stage": "准备中",
             "file": "", "error": "", "started": time.time(),
+            "files": [], "outputs": outputs,
         })
         _STOP["flag"] = False
 
-    t = threading.Thread(target=_worker, args=(cfg, vid, dest_dir, min_height), daemon=True)
+    t = threading.Thread(target=_worker, args=(cfg, vid, dest_dir, min_height, outputs), daemon=True)
     t.start()
     return True, "已开始"
 
 
-def _worker(cfg, vid, dest_dir, min_height):
+def _ffmpeg_make(ff, src, dst, video=True):
+    """用 ffmpeg 派生文件。video=True 去音轨；video=False 提音频。返回是否成功"""
+    if not ff:
+        return False
+    if video:
+        cmd = [ff, "-y", "-i", src, "-an", "-c:v", "copy", "-movflags", "+faststart", dst]
+    else:
+        cmd = [ff, "-y", "-i", src, "-vn", "-c:a", "copy", dst]
+    try:
+        subprocess.run(cmd, capture_output=True, text=True, timeout=900,
+                       encoding="utf-8", errors="replace")
+        return os.path.exists(dst) and os.path.getsize(dst) > 10000
+    except Exception:
+        return False
+
+
+def _worker(cfg, vid, dest_dir, min_height, outputs=None):
+    outputs = outputs or ["video"]
+    want_video = "video" in outputs
+    want_noaudio = "noaudio" in outputs
+    want_audio = "audio" in outputs
+    # 勾了视频相关 → 下完整流；只勾音频 → 直接下音频流（省流量）
+    need_full = want_video or want_noaudio
     try:
         os.makedirs(dest_dir, exist_ok=True)
         adv = cfg["advanced"]
         minh = int(min_height or cfg["quality"].get("min_height") or 1080)
 
-        # ★★ 音频必须优先 AAC(140)，不要 Opus(251)
-        #  实测：AV1 + Opus 的 MP4（major_brand=isom）在 Windows 自带播放器里
-        #  经常打不开 —— Opus 在 MP4 容器中的支持很差。
-        #  AAC 是通用格式，任何设备/播放器/剪辑软件都认。
-        #  视频仍用 AV1（同画质体积只有 H.264 的 1/3），只是音频换成 AAC。
-        #  体积几乎不变：Opus 138k vs AAC 128k。
-        # ★ 注意：每个候选必须完整写成「视频+音频」，
-        #   不能写成 bv+A/bv+A 而让 A 里再带 "/" —— 那样会解析出只有音频的候选。
-        H = "bestvideo[height>=%d]" % minh if minh >= 1080 else "bestvideo"
-        M7 = "bestvideo[height>=720]"
+        # ★ 音频一律优先 AAC(m4a)：Opus 封在 MP4 里 Windows 自带播放器不认
         A1, A2 = "bestaudio[ext=m4a]", "bestaudio[acodec^=mp4a]"
-        cands = []
-        if minh >= 1080:
-            cands += ["%s+%s" % (H, A1), "%s+%s" % (H, A2),
-                      "%s+%s" % (M7, A1), "%s+%s" % (M7, A2)]
-        cands += ["bestvideo+%s" % A1, "bestvideo+%s" % A2,
-                  "bestvideo+bestaudio", "best"]
-        fmt = "/".join(cands)
+        if need_full:
+            H = "bestvideo[height>=%d]" % minh if minh >= 1080 else "bestvideo"
+            M7 = "bestvideo[height>=720]"
+            cands = []
+            if minh >= 1080:
+                cands += ["%s+%s" % (H, A1), "%s+%s" % (H, A2),
+                          "%s+%s" % (M7, A1), "%s+%s" % (M7, A2)]
+            cands += ["bestvideo+%s" % A1, "bestvideo+%s" % A2,
+                      "bestvideo+bestaudio", "best"]
+            fmt = "/".join(cands)
+            merge = ["--merge-output-format", "mp4"]
+        else:
+            fmt = "%s/%s/bestaudio/best" % (A1, A2)
+            merge = []
 
-        args = base_args(cfg) + [
-            "-f", fmt,
-            "--merge-output-format", "mp4",
+        args = base_args(cfg) + ["-f", fmt] + merge + [
             "--no-write-subs", "--no-write-auto-subs",
             "--no-write-thumbnail", "--no-write-description",
-            "--windows-filenames",
-            "--newline",                       # 让进度逐行输出，便于解析
-            "--progress",
+            "--windows-filenames", "--newline", "--progress",
             "-o", os.path.join(dest_dir, "%(title).120B [%(id)s].%(ext)s"),
             "https://www.youtube.com/watch?v=" + vid,
         ]
@@ -220,11 +244,9 @@ def _worker(cfg, vid, dest_dir, min_height):
             line = line.rstrip()
             if not line:
                 continue
-            # 目标文件名
-            m = re.search(r"Destination:\s*(.+)$", line)
+            m = re.search(r"Destination:/s*(.+)$", line)
             if m:
                 last_target = m.group(1).strip()
-            # 进度
             m = re.search(r"\[download\]\s+([\d.]+)%\s+of\s+\S+\s+at\s+(\S+)\s+ETA\s+(\S+)", line)
             if m:
                 with _TASK_LOCK:
@@ -234,57 +256,94 @@ def _worker(cfg, vid, dest_dir, min_height):
             elif "[download] 100%" in line:
                 with _TASK_LOCK:
                     _TASK["percent"] = 100.0
-            # 合并阶段
             if "[Merger]" in line or "Merging formats" in line:
                 with _TASK_LOCK:
                     _TASK["stage"] = "合并音视频"
                     _TASK["percent"] = 99.0
-            # 标题
-            mt = re.search(r"\[youtube\]\s+%s:\s+Downloading.*?\"(.+?)\"" % vid, line)
-            if mt:
-                with _TASK_LOCK:
-                    _TASK["title"] = mt.group(1)
 
         proc.wait()
-
-        # 清理中间流（移到隔离区，不删除）
         _sweep_intermediates(dest_dir)
 
-        # 找成品
+        # 找主文件
         found = ""
         if last_target and os.path.exists(last_target):
             found = last_target
         else:
-            cands = [f for f in os.listdir(dest_dir)
-                     if vid in f and f.endswith(".mp4") and not re.search(r"\.f\d+\.", f)]
-            if cands:
-                found = os.path.join(dest_dir, cands[0])
+            exts = (".mp4",) if need_full else (".m4a", ".mp3", ".opus", ".webm", ".mp4")
+            for f in sorted(os.listdir(dest_dir)):
+                if (vid in f and f.endswith(exts)
+                        and not re.search(r"\.f\d+\.", f)
+                        and not f.endswith((".part", ".ytdl"))):
+                    found = os.path.join(dest_dir, f)
+                    break
 
-        with _TASK_LOCK:
-            if _STOP["flag"]:
+        if _STOP["flag"]:
+            with _TASK_LOCK:
                 _TASK["stage"] = "已取消"
                 _TASK["error"] = "用户取消"
-            elif found:
-                h, w = 0, 0
-                try:
-                    from . import download as _dl
-                    info = _dl.probe_media(found)
-                    h, w = info.get("height", 0), info.get("width", 0)
-                except Exception:
-                    pass
-                note = ""
-                if h and h < 1080:
-                    note = "该视频源站最高只有 %dp，已按最高可用下载" % h
-                # 标题优先用解析阶段拿到的；没有就从文件名去掉 [id].mp4 后缀
-                clean = re.sub(r"\s*\[[A-Za-z0-9_-]{11}\]\.mp4$", "",
-                               os.path.basename(found))
-                _TASK.update({"stage": "完成", "file": found.replace("\\", "/"),
-                              "percent": 100.0, "title": _TASK["title"] or clean,
-                              "res": ("%dx%d" % (w, h)) if h else "", "note": note})
-            else:
+            return
+
+        if not found:
+            with _TASK_LOCK:
                 _TASK["stage"] = "失败"
                 _TASK["error"] = ("没有生成成品文件。若下载被中断（如服务重启/手动取消），"
                                   "目录里可能残留 .part 文件，已自动移到 _quarantine")
+            return
+
+        # ── 派生其他格式 ──
+        ff = common.find_ffmpeg()
+        stem = os.path.splitext(found)[0]
+        results = []
+
+        if need_full and want_video:
+            results.append({"path": found, "kind": "原视频"})
+
+        if want_noaudio:
+            with _TASK_LOCK:
+                _TASK["stage"] = "生成无音轨版本"
+            out = stem + "_无音轨.mp4"
+            if _ffmpeg_make(ff, found, out, video=True):
+                results.append({"path": out, "kind": "视频（无音轨）"})
+            else:
+                results.append({"path": "", "kind": "视频（无音轨）", "error": "转换失败"})
+
+        if want_audio:
+            with _TASK_LOCK:
+                _TASK["stage"] = "提取音频"
+            out = stem + ".m4a"
+            if _ffmpeg_make(ff, found, out, video=False):
+                results.append({"path": out, "kind": "音频"})
+            else:
+                results.append({"path": "", "kind": "音频", "error": "提取失败"})
+
+        # 只勾音频时，下载到的本身就是音频
+        if not need_full and want_audio and not results:
+            results.append({"path": found, "kind": "音频"})
+
+        h = w = 0
+        try:
+            from . import download as _dl
+            info = _dl.probe_media(found)
+            h, w = info.get("height", 0), info.get("width", 0)
+        except Exception:
+            pass
+        note = ""
+        if h and h < 1080:
+            note = "该视频源站最高只有 %dp，已按最高可用下载" % h
+
+        clean = re.sub(r"\s*\[[A-Za-z0-9_-]{11}\](\.[A-Za-z0-9]+)?$", "",
+                       os.path.basename(found))
+
+        with _TASK_LOCK:
+            _TASK.update({
+                "stage": "完成", "percent": 100.0,
+                "file": found.replace("\\", "/"),
+                "files": [{"path": (r.get("path") or "").replace("\\", "/"),
+                           "kind": r["kind"], "error": r.get("error", "")} for r in results],
+                "title": _TASK["title"] or clean,
+                "res": ("%dx%d" % (w, h)) if h else "",
+                "note": note,
+            })
     except Exception as e:
         with _TASK_LOCK:
             _TASK["stage"] = "失败"

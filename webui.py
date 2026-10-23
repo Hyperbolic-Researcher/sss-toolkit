@@ -140,12 +140,14 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 if path and os.path.exists(path):
                     if os.path.isfile(path):
-                        # ★ 用 /select 打开所在文件夹并选中该文件，而不是只打开目录
-                        subprocess.Popen(["explorer", "/select," + os.path.normpath(path)])
+                        # ★ 必须给路径加引号：路径含空格或中文逗号（，）时，
+                        #   不加引号会被 explorer 拆成多个参数，跳到错误位置。
+                        subprocess.Popen('explorer /select,"%s"' % os.path.normpath(path),
+                                         shell=True)
                     else:
                         os.startfile(path)
                     return self._json({"ok": True})
-                return self._json({"ok": False, "error": "路径不存在"})
+                return self._json({"ok": False, "error": "文件不存在（可能已被移动或清理）"})
             except Exception as e:
                 return self._json({"ok": False, "error": str(e)[:80]})
         if u.path == "/api/open":
@@ -177,7 +179,9 @@ class Handler(BaseHTTPRequestHandler):
             cfg = common.load_config()
             url = (q.get("url") or [""])[0]
             dest = (q.get("dest") or [cfg["output_dir"]])[0]
-            ok, msg = sg.start_download(cfg, url, dest)
+            outs = (q.get("outputs") or ["video"])[0]
+            outs = [x for x in outs.split(",") if x]
+            ok, msg = sg.start_download(cfg, url, dest, outputs=outs)
             return self._json({"ok": ok, "msg": msg})
         if u.path == "/api/dl_stop":
             sg.stop_task()
@@ -231,8 +235,7 @@ height:340px;overflow-y:auto;font:12px/1.65 ui-monospace,Consolas,monospace;whit
 </style>
 </head>
 <body><div class="wrap">
-<h1>频道资料库 · 一键构建</h1>
-<div class="sub">下载 · 官方歌词 · 难度分级 · Excel 清单 —— 改 config.json 即可换频道</div>
+<h1>视频下载</h1>
 
 <div class="card" style="border-color:#2f4a6d">
   <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
@@ -259,9 +262,21 @@ height:340px;overflow-y:auto;font:12px/1.65 ui-monospace,Consolas,monospace;whit
         title="点击选择目录" />
       <button class="ghost" onclick="pickFolder()" style="flex:none;font-size:12.5px;padding:7px 14px">浏览…</button>
     </div>
+    <div style="display:flex;gap:14px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+      <span style="color:var(--dim);font-size:12.5px;flex:none">下载内容</span>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="optVideo" checked style="width:15px;height:15px;cursor:pointer" /> 原视频
+      </label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="optNoAudio" style="width:15px;height:15px;cursor:pointer" /> 视频（无音轨）
+      </label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="optAudio" style="width:15px;height:15px;cursor:pointer" /> 音频（m4a）
+      </label>
+      <span style="color:#5a6373;font-size:11.5px">可多选</span>
+    </div>
     <div style="display:flex;gap:8px">
       <button id="btnDl" onclick="startDl()" style="flex:1">开始下载</button>
-      <button class="ghost" onclick="openDest()">打开目录</button>
     </div>
   </div>
   <div id="dlBox" style="display:none;margin-top:12px">
@@ -270,9 +285,8 @@ height:340px;overflow-y:auto;font:12px/1.65 ui-monospace,Consolas,monospace;whit
     <div class="stat" style="margin-top:2px"><span id="dlSpeed" style="font-size:12px"></span><span id="dlEta" style="font-size:12px"></span></div>
     <div id="dlDone" style="display:none;margin-top:10px;padding:10px;border-radius:7px;
          background:#12261c;border:1px solid #1f4d38">
-      <div id="dlDoneTitle" style="color:var(--ok);font-size:13px;margin-bottom:4px">✓ 下载完成</div>
-      <div id="dlFile" style="color:var(--dim);font-size:11.5px;word-break:break-all;margin-bottom:8px"></div>
-      <button class="ghost" onclick="openFile()" style="font-size:12px;padding:6px 12px">打开所在文件夹</button>
+      <div id="dlDoneTitle" style="color:var(--ok);font-size:13px;margin-bottom:8px">✓ 下载完成</div>
+      <div id="dlFiles"></div>
     </div>
     <div id="dlErr" style="display:none;margin-top:10px;color:var(--err);font-size:12.5px"></div>
     <div style="margin-top:10px"><button class="ghost" onclick="stopDl()" id="btnStopDl" style="font-size:12px;padding:6px 12px">取消下载</button></div>
@@ -318,7 +332,7 @@ height:340px;overflow-y:auto;font:12px/1.65 ui-monospace,Consolas,monospace;whit
 let busy=false;
 
 // ══ 单视频下载 ══
-let probeTimer=null, dlTimer=null, lastUrl="", lastFile="", lastDest="";
+let probeTimer=null, dlTimer=null, lastUrl="", lastFile="", lastDest="", lastFiles=[];
 // ★ 只有本页面真正跑过任务，才显示状态条和日志；刷新后不显示历史残留
 let hadTask=false;
 
@@ -387,8 +401,15 @@ async function startDl(){
   const url = urlEl.value.trim();
   const dest = $('dlDest').value.trim();
   if(!url){ alert('请先粘贴链接'); return; }
-  if(!dest){ alert('请填写保存目录'); return; }
+  if(!dest){ alert('请先选择保存目录'); return; }
   lastDest = dest;
+
+  // 收集勾选项
+  const outs = [];
+  if($('optVideo').checked) outs.push('video');
+  if($('optNoAudio').checked) outs.push('noaudio');
+  if($('optAudio').checked) outs.push('audio');
+  if(!outs.length){ alert('请至少勾选一项下载内容'); return; }
 
   $('dlBox').style.display='block';
   $('dlDone').style.display='none';
@@ -400,7 +421,7 @@ async function startDl(){
   $('dlEta').textContent='';
   $('btnDl').disabled = true;
 
-  const r = await (await fetch('/api/dl_single?url='+encodeURIComponent(url)+'&dest='+encodeURIComponent(dest),{method:'POST'})).json();
+  const r = await (await fetch('/api/dl_single?url='+encodeURIComponent(url)+'&dest='+encodeURIComponent(dest)+'&outputs='+outs.join(','),{method:'POST'})).json();
   if(!r.ok){
     $('dlErr').style.display='block';
     $('dlErr').textContent = r.msg || '启动失败';
@@ -427,12 +448,13 @@ async function pollDl(){
     clearInterval(dlTimer); dlTimer=null;
     $('btnDl').disabled = false;
     if(d.stage==='完成'){
-      lastFile = d.file||'';
+      lastFiles = d.files || [];
+      lastFile = d.file || (lastFiles[0] && lastFiles[0].path) || '';
       $('dlDone').style.display='block';
       $('dlDoneTitle').innerHTML = d.note
         ? '<span style="color:var(--warn)">✓ 已下载（'+esc(d.note)+'）</span>'
         : '<span style="color:var(--ok)">✓ 下载完成'+(d.res?' · '+esc(d.res):'')+'</span>';
-      $('dlFile').textContent = d.file||'';
+      renderFiles(lastFiles);
       $('dlFill').style.width='100%';
       $('dlPct').textContent='100%';
       $('btnStopDl').style.display='none';
@@ -450,6 +472,30 @@ async function stopDl(){
   await fetch('/api/dl_stop',{method:'POST'});
   $('dlStage').textContent='正在停止…';
 }
+function renderFiles(files){
+  const box = $('dlFiles');
+  if(!files || !files.length){ box.innerHTML=''; return; }
+  box.innerHTML = files.map((f,i)=>{
+    if(!f.path){
+      return '<div style="color:var(--err);font-size:12px;margin-bottom:6px">'
+        + esc(f.kind) + '：' + esc(f.error||'生成失败') + '</div>';
+    }
+    const name = f.path.split('/').pop();
+    return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">'
+      + '<span style="font-size:11px;padding:2px 8px;border-radius:4px;background:#1f4d38;color:var(--ok);flex:none">'+esc(f.kind)+'</span>'
+      + '<span style="color:var(--dim);font-size:11.5px;word-break:break-all;flex:1">'+esc(name)+'</span>'
+      + '<button class="ghost" onclick="openFileAt('+i+')" style="font-size:11.5px;padding:4px 12px;flex:none">打开</button>'
+      + '</div>';
+  }).join('');
+}
+
+function openFileAt(i){
+  const f = lastFiles[i];
+  if(f && f.path) fetch('/api/open_folder?path='+encodeURIComponent(f.path))
+    .then(r=>r.json()).then(j=>{ if(!j.ok) alert(j.error||'打开失败'); })
+    .catch(()=>{});
+}
+
 function openFile(){
   if(lastFile) fetch('/api/open_folder?path='+encodeURIComponent(lastFile));
 }
