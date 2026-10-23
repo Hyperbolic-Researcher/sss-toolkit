@@ -56,11 +56,17 @@ def fmt_string(cfg):
     """★ 画质格式串。这里绝不能加 /best —— 那是 360p 降清的元凶。"""
     q = cfg["quality"]
     minh = int(q.get("min_height") or 1080)
+    # ★ 批量也要优先 AAC(m4a) 音频：
+    #   Opus 封在 MP4 里 Windows 自带播放器不认，且无法 copy 成 m4a（实测派生出 0 字节文件）。
+    A = "bestaudio[ext=m4a]"
     if q.get("mode") == "strict":
-        return ("bestvideo[height>=%d][ext=mp4]+bestaudio/"
-                "bestvideo[height>=%d]+bestaudio" % (minh, minh))
+        return ("bestvideo[height>=%d]+%s/"
+                "bestvideo[height>=%d]+bestaudio/"
+                "bestvideo+%s/"
+                "bestvideo+bestaudio" % (minh, A, minh, A))
     # lenient：不强制高度，但依然禁止 /best
-    return "bestvideo[ext=mp4]+bestaudio/bestvideo+bestaudio"
+    return ("bestvideo[ext=mp4]+%s/bestvideo+%s/"
+            "bestvideo+bestaudio" % (A, A))
 
 
 def build_cmd(cfg, url, out_dir, batch_log):
@@ -114,7 +120,11 @@ def build_cmd(cfg, url, out_dir, batch_log):
         extra += ";youtubepot-bgutilhttp:base_url=" + net["pot_server"]
     args += ["--extractor-args", extra]
 
-    args.append(url)
+    # ★ 批量模式传 url=None（走 -a 清单），不能把 None 塞进参数列表 ——
+    #   调用方会做 c.startswith("https://") 过滤，None 会抛
+    #   AttributeError: 'NoneType' object has no attribute 'startswith'
+    if url:
+        args.append(url)
     return args
 
 
@@ -251,11 +261,29 @@ def sweep_intermediates(out_dir):
 
 
 # ---------------- 主下载循环 ----------------
-def download(cfg, limit_batch=24, max_rounds=0, stop_flag=None, progress_cb=None):
-    """下载主循环。返回统计 dict。"""
+def download(cfg, limit_batch=24, max_rounds=0, stop_flag=None, progress_cb=None,
+             only_ids=None):
+    """下载主循环。
+
+    only_ids: 只下载这些视频 ID（前端勾选的结果）。None 表示清单全量。
+    """
     out_dir = cfg["output_dir"]
     os.makedirs(out_dir, exist_ok=True)
     videos = scan_mod.read_list(out_dir)
+
+    # ★ only_ids 优先：前端勾选的结果才是唯一依据。
+    #   不能只依赖 videos.txt —— 用户可能把保存目录换成了一个新文件夹，
+    #   而清单还在旧目录里（实测踩过：日志显示"按勾选下载：0 个 / 清单为空"）。
+    if only_ids:
+        want = set(only_ids)
+        from_list = [v for v in videos if v[0] in want]
+        if len(from_list) >= len(want):
+            videos = from_list
+        else:
+            # 清单缺失或不完整 → 直接用勾选的 ID 构造（标题交给 yt-dlp 自己取）
+            have = {v[0] for v in from_list}
+            videos = from_list + [(x, "", "0", "") for x in want if x not in have]
+        common.log("按勾选下载：%d 个" % len(videos))
     if not videos:
         common.log("清单为空，请先执行 scan", "ERROR")
         return {"error": "no_list"}

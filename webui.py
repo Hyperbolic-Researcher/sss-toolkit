@@ -10,7 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from core import common, scan as scan_mod, download as dl, lyrics as lyr, report as rep, single as sg
+from core import common, scan as scan_mod, download as dl, lyrics as lyr, report as rep, single as sg, channel as ch, batch as bt
 
 PORT = int(os.environ.get("SSS_PORT", "8765"))
 # ★ 手机访问：默认只监听本机；加 --lan 参数则监听所有网卡，手机连同一 WiFi 即可访问
@@ -163,6 +163,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(sg.probe(cfg, url))
         if u.path == "/api/dl_status":
             return self._json(sg.task_state())
+        if u.path == "/api/channel_state":
+            return self._json(ch.scan_state())
+        if u.path == "/api/batch_state":
+            return self._json(bt.state())
         if u.path == "/api/diagnose":
             return self._json(diagnose())
         if u.path == "/api/pick_folder":
@@ -217,14 +221,45 @@ class Handler(BaseHTTPRequestHandler):
             _WORKER["task"] = task
             t.start()
             return self._json({"ok": True, "task": task})
+        if u.path == "/api/channel_scan":
+            cfg = common.load_config()
+            url = (q.get("url") or [""])[0].strip()
+            ok, msg = ch.start_scan(cfg, url)
+            return self._json({"ok": ok, "msg": msg})
+        if u.path == "/api/channel_stop":
+            ch.stop_scan()
+            return self._json({"ok": True})
+        if u.path == "/api/batch_start":
+            cfg = common.load_config()
+            ids = (q.get("ids") or [""])[0]
+            outs = (q.get("outputs") or ["video"])[0]
+            dl_dir = (q.get("dest") or [""])[0].strip()
+            chn = (q.get("channel") or [""])[0].strip()
+            # 先把目录/频道写回配置，下载模块要读
+            if dl_dir:
+                cfg["output_dir"] = dl_dir
+            if chn:
+                cfg["channel_url"] = chn
+            try:
+                json.dump(cfg, open(common.CONFIG_PATH, "w", encoding="utf-8"),
+                          ensure_ascii=False, indent=2)
+            except Exception:
+                pass
+            id_list = [x for x in ids.split(",") if x]
+            out_list = [x for x in outs.split(",") if x]
+            ok, msg = bt.start(cfg, id_list, out_list)
+            return self._json({"ok": ok, "msg": msg})
+        if u.path == "/api/batch_stop":
+            bt.stop()
+            return self._json({"ok": True})
         if u.path == "/api/save_config":
             cfg = common.load_config()
-            ch = (q.get("channel") or [""])[0].strip()
+            chv = (q.get("channel") or [""])[0].strip()
             od = (q.get("output_dir") or [""])[0].strip()
             mh = (q.get("min_height") or [""])[0].strip()
             changed = []
-            if ch:
-                cfg["channel_url"] = ch
+            if chv:
+                cfg["channel_url"] = chv
                 changed.append("频道")
             if od:
                 cfg["output_dir"] = od
@@ -299,6 +334,12 @@ height:340px;overflow-y:auto;font:12px/1.65 ui-monospace,Consolas,monospace;whit
 .tag{display:inline-block;font-size:11px;padding:1px 7px;border-radius:4px;background:#232a34;color:var(--dim);margin-left:6px}
 .dot{width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:5px}
 .on{background:var(--ok)}.off{background:#4a5260}
+@keyframes slide{0%{transform:translateX(-100%)}100%{transform:translateX(360%)}}
+@keyframes spin{to{transform:rotate(360deg)}}
+.spin{width:14px;height:14px;border:2px solid var(--line);border-top-color:var(--ok);
+border-radius:50%;animation:spin .8s linear infinite;flex:none}
+tr.row:hover{background:#161b24}
+td{padding:7px 8px;border-bottom:1px solid #1e242d}
 </style>
 </head>
 <body><div class="wrap">
@@ -400,15 +441,19 @@ height:340px;overflow-y:auto;font:12px/1.65 ui-monospace,Consolas,monospace;whit
 <div class="card" style="border-color:#2a3340">
   <div style="font-size:15px;font-weight:600;margin-bottom:4px">频道批量下载</div>
   <div style="color:var(--dim);font-size:12px;margin-bottom:16px">
-    把一个频道的所有视频一次下完，可选抓官方歌词、生成 Excel 清单
+    先解析频道拿到视频列表，勾选要下的，再统一下载（不设画质门槛，一律取最高）
   </div>
 
-  <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:16px">
+  <!-- 步骤一：地址与目录 -->
+  <div style="display:flex;flex-direction:column;gap:12px">
     <div>
       <div style="color:var(--dim);font-size:12px;margin-bottom:5px">频道地址</div>
-      <input id="bChannel" placeholder="https://www.youtube.com/@频道名/videos"
-        style="width:100%;background:#0b0e13;border:1px solid var(--line);color:var(--txt);
-        border-radius:7px;padding:9px 12px;font-size:13px;outline:none" spellcheck="false" />
+      <div style="display:flex;gap:8px">
+        <input id="bChannel" placeholder="https://www.youtube.com/@频道名/videos"
+          style="flex:1;background:#0b0e13;border:1px solid var(--line);color:var(--txt);
+          border-radius:7px;padding:9px 12px;font-size:13px;outline:none" spellcheck="false" />
+        <button id="bParse" onclick="startParse()" style="flex:none">解析</button>
+      </div>
     </div>
     <div>
       <div style="color:var(--dim);font-size:12px;margin-bottom:5px">保存到</div>
@@ -419,19 +464,69 @@ height:340px;overflow-y:auto;font:12px/1.65 ui-monospace,Consolas,monospace;whit
         <button class="ghost" onclick="pickBatchFolder()" style="flex:none;font-size:12.5px;padding:9px 16px">浏览…</button>
       </div>
     </div>
-    <div>
-      <div style="color:var(--dim);font-size:12px;margin-bottom:5px">画质门槛（低于此值会跳过，不会降清）</div>
-      <select id="bQuality" style="width:100%;background:#0b0e13;border:1px solid var(--line);
-        color:var(--txt);border-radius:7px;padding:9px 12px;font-size:13px;outline:none">
-        <option value="2160">4K（2160p）— 文件很大</option>
-        <option value="1080" selected>1080p — 推荐</option>
-        <option value="720">720p — 省空间</option>
-      </select>
+  </div>
+
+  <!-- 解析进度 -->
+  <div id="parseBox" style="display:none;margin-top:14px;padding:12px;background:#141821;
+       border:1px solid var(--line);border-radius:8px">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+      <div class="spin"></div>
+      <span id="parseMsg" style="font-size:13px;color:var(--txt)">正在解析频道…</span>
+      <span id="parseCount" style="margin-left:auto;font-size:12px;color:var(--dim)"></span>
+    </div>
+    <div style="height:4px;background:#0b0e13;border-radius:2px;overflow:hidden">
+      <div id="parseBar" style="height:100%;width:30%;background:linear-gradient(90deg,#4c8dff,#3ddc97);
+           animation:slide 1.4s ease-in-out infinite"></div>
+    </div>
+    <div style="color:#5a6373;font-size:11.5px;margin-top:8px">
+      频道视频多时需要几分钟，请耐心等待，不要关闭页面
     </div>
   </div>
 
-  <button onclick="startBatch()" id="b-start" style="width:100%;padding:11px">保存设置并开始下载</button>
+  <!-- 步骤二：列表 -->
+  <div id="listBox" style="display:none;margin-top:16px">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+      <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;cursor:pointer">
+        <input type="checkbox" id="chkAll" onchange="toggleAll(this.checked)"
+          style="width:15px;height:15px;cursor:pointer" /> 全选
+      </label>
+      <span id="listStat" style="color:var(--dim);font-size:12px"></span>
+      <input id="listFilter" placeholder="搜索标题…" oninput="renderList()"
+        style="margin-left:auto;background:#0b0e13;border:1px solid var(--line);color:var(--txt);
+        border-radius:6px;padding:6px 10px;font-size:12px;outline:none;width:180px" />
+    </div>
 
+    <div style="max-height:340px;overflow-y:auto;border:1px solid var(--line);border-radius:8px">
+      <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+        <thead>
+          <tr style="background:#141821;position:sticky;top:0">
+            <th style="width:36px;padding:8px;text-align:center"></th>
+            <th style="text-align:left;padding:8px;color:var(--dim);font-weight:500">标题</th>
+            <th style="width:70px;padding:8px;text-align:right;color:var(--dim);font-weight:500">时长</th>
+            <th style="width:90px;padding:8px;text-align:right;color:var(--dim);font-weight:500">预估大小</th>
+          </tr>
+        </thead>
+        <tbody id="listBody"></tbody>
+      </table>
+    </div>
+
+    <div style="display:flex;gap:14px;align-items:center;margin:14px 0;flex-wrap:wrap">
+      <span style="color:var(--dim);font-size:12.5px;flex:none">下载内容</span>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="bOptVideo" checked style="width:15px;height:15px;cursor:pointer" /> 原视频
+      </label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="bOptNoAudio" style="width:15px;height:15px;cursor:pointer" /> 视频（无音轨）
+      </label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="bOptAudio" style="width:15px;height:15px;cursor:pointer" /> 音频（m4a）
+      </label>
+    </div>
+
+    <button onclick="startBatchDl()" id="b-do" style="width:100%;padding:11px">开始下载勾选的视频</button>
+  </div>
+
+  <!-- 步骤三：下载进度 -->
   <div id="batchProg" style="display:none;margin-top:16px;padding:12px;background:#141821;
        border:1px solid var(--line);border-radius:8px">
     <div class="stat" style="margin-bottom:8px">
@@ -439,21 +534,21 @@ height:340px;overflow-y:auto;font:12px/1.65 ui-monospace,Consolas,monospace;whit
     </div>
     <div class="bar"><i id="bFill"></i></div>
     <div class="stat" style="margin-top:6px">
-      <span id="bCount">0 / 0</span><span id="bUpdated"></span>
+      <span id="bCount"></span><span id="bDetail"></span>
+    </div>
+    <div style="margin-top:10px">
+      <button class="danger" onclick="stopBatch()" id="b-stopdl" style="font-size:12px;padding:6px 14px">停止下载</button>
     </div>
   </div>
 
   <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line)">
     <button class="ghost" onclick="toggleAdv()" id="btnAdv" style="font-size:12px;padding:6px 14px">更多操作</button>
     <div id="advBody" style="display:none;margin-top:12px">
-      <div style="color:var(--dim);font-size:11.5px;margin-bottom:8px">单步执行（一般用不到，全部流程已包含在「开始下载」里）</div>
+      <div style="color:var(--dim);font-size:11.5px;margin-bottom:8px">单步执行（一般用不到）</div>
       <div class="row">
         <button class="ghost" onclick="go('check')" id="b-check" style="font-size:12.5px">环境体检</button>
-        <button class="ghost" onclick="go('scan')" id="b-scan" style="font-size:12.5px">1 只抓清单</button>
-        <button class="ghost" onclick="go('download')" id="b-download" style="font-size:12.5px">2 只下载</button>
-        <button class="ghost" onclick="go('lyrics')" id="b-lyrics" style="font-size:12.5px">3 只抓歌词</button>
-        <button class="ghost" onclick="go('report')" id="b-report" style="font-size:12.5px">4 只出表格</button>
-        <button class="danger" onclick="stop()" id="b-stop" style="font-size:12.5px">停止</button>
+        <button class="ghost" onclick="go('lyrics')" id="b-lyrics" style="font-size:12.5px">抓歌词</button>
+        <button class="ghost" onclick="go('report')" id="b-report" style="font-size:12.5px">生成 Excel</button>
         <button class="ghost" onclick="openDir()" style="font-size:12.5px">打开输出目录</button>
       </div>
       <div id="meta" class="meta" style="margin-top:12px"></div>
@@ -461,7 +556,7 @@ height:340px;overflow-y:auto;font:12px/1.65 ui-monospace,Consolas,monospace;whit
   </div>
 </div>
 
-<div class="card" id="statusCard" style="display:none">
+<div class="card" id="statusCard"  style="display:none">
   <div class="stat"><span id="stage">待机</span><span id="pct">0%</span></div>
   <div class="bar"><i id="fill"></i></div>
   <div class="stat"><span id="count">0 / 0</span><span id="tstate"></span></div>
@@ -489,6 +584,147 @@ function toggleAdv(){
   if(!open) refresh();
 }
 
+// ══ 频道批量：三步流程 ══
+let parseTimer=null, batchTimer=null, scanItems=[], selSet=new Set();
+
+async function startParse(){
+  const url = $('bChannel').value.trim();
+  const dest = $('bDest').value.trim();
+  if(!url){ alert('请先粘贴频道地址'); $('bChannel').focus(); return; }
+  if(!dest){ alert('请先选择保存目录'); return; }
+
+  $('bParse').disabled = true;
+  $('parseBox').style.display = 'block';
+  $('listBox').style.display = 'none';
+  $('batchProg').style.display = 'none';
+  $('parseMsg').textContent = '正在解析频道…';
+  $('parseCount').textContent = '0 个';
+
+  const r = await (await fetch('/api/channel_scan?url='+encodeURIComponent(url),{method:'POST'})).json();
+  if(!r.ok){ alert(r.msg||'启动解析失败'); $('bParse').disabled=false; return; }
+
+  clearInterval(parseTimer);
+  parseTimer = setInterval(pollParse, 800);
+  pollParse();
+}
+
+async function pollParse(){
+  let d;
+  try{ d = await (await fetch('/api/channel_state')).json(); }catch(e){ return; }
+
+  $('parseCount').textContent = (d.count||0) + ' 个';
+  if(d.running){
+    const sec = d.elapsed||0;
+    $('parseMsg').textContent = '正在解析频道…已用 ' + fmtSec(sec);
+    return;
+  }
+
+  clearInterval(parseTimer); parseTimer=null;
+  $('bParse').disabled = false;
+  $('parseBox').style.display = 'none';
+
+  if(d.stage === '完成' && (d.items||[]).length){
+    scanItems = d.items;
+    selSet = new Set(scanItems.map(x=>x.id));   // 默认全选
+    $('listBox').style.display = 'block';
+    $('listStat').textContent = '共 ' + scanItems.length + ' 个视频';
+    renderList();
+  }else if(d.stage === '已取消'){
+    $('parseMsg').textContent = '已取消';
+  }else{
+    alert('解析失败：' + (d.error||'未知原因'));
+  }
+}
+
+function fmtSec(s){
+  s = Math.max(0, Math.floor(s||0));
+  if(s < 60) return s+' 秒';
+  const m = Math.floor(s/60), r = s%60;
+  return m+' 分 '+(r<10?'0':'')+r+' 秒';
+}
+
+function renderList(){
+  const kw = ($('listFilter').value||'').trim().toLowerCase();
+  const rows = scanItems.filter(x => !kw || (x.title||'').toLowerCase().includes(kw));
+  const body = $('listBody');
+  if(!rows.length){ body.innerHTML = '<tr><td colspan="4" style="padding:16px;text-align:center;color:var(--dim)">没有匹配的视频</td></tr>'; }
+  else {
+    body.innerHTML = rows.map(x=>{
+      const on = selSet.has(x.id);
+      return '<tr class="row">'
+        + '<td style="text-align:center"><input type="checkbox" '+(on?'checked':'')+' onchange="toggleOne(\''+x.id+'\',this.checked)" style="width:14px;height:14px;cursor:pointer" /></td>'
+        + '<td style="color:#d7dce4">'+esc(x.title||x.id)+'</td>'
+        + '<td style="text-align:right;color:var(--dim)">'+(x.dur_text||'')+'</td>'
+        + '<td style="text-align:right;color:var(--dim)">'+(x.size_mb?('~'+x.size_mb+' MB'):'—')+'</td>'
+        + '</tr>';
+    }).join('');
+  }
+  $('listStat').textContent = '共 ' + scanItems.length + ' 个 · 已选 ' + selSet.size;
+  $('chkAll').checked = scanItems.length>0 && selSet.size===scanItems.length;
+}
+
+function toggleOne(id, on){ on ? selSet.add(id) : selSet.delete(id); renderList(); }
+function toggleAll(on){
+  if(on) scanItems.forEach(x=>selSet.add(x.id));
+  else selSet.clear();
+  renderList();
+}
+
+async function startBatchDl(){
+  if(!selSet.size){ alert('请至少勾选一个视频'); return; }
+  const outs = [];
+  if($('bOptVideo').checked) outs.push('video');
+  if($('bOptNoAudio').checked) outs.push('noaudio');
+  if($('bOptAudio').checked) outs.push('audio');
+  if(!outs.length){ alert('请至少勾选一项下载内容'); return; }
+
+  const ids = Array.from(selSet).join(',');
+  const dest = $('bDest').value.trim();
+  const chn = $('bChannel').value.trim();
+
+  $('b-do').disabled = true;
+  $('batchProg').style.display = 'block';
+  $('bStage').textContent = '准备中';
+  $('bFill').style.width = '0%';
+  $('bPct').textContent = '0%';
+
+  const r = await (await fetch('/api/batch_start?ids='+encodeURIComponent(ids)
+      +'&outputs='+outs.join(',')
+      +'&dest='+encodeURIComponent(dest)
+      +'&channel='+encodeURIComponent(chn), {method:'POST'})).json();
+  if(!r.ok){ alert(r.msg||'启动失败'); $('b-do').disabled=false; return; }
+
+  clearInterval(batchTimer);
+  batchTimer = setInterval(pollBatch, 1200);
+  pollBatch();
+}
+
+async function pollBatch(){
+  let d;
+  try{ d = await (await fetch('/api/batch_state')).json(); }catch(e){ return; }
+  const pct = d.total ? Math.round((d.done||0)/d.total*100) : 0;
+  $('bStage').textContent = d.stage || '';
+  $('bFill').style.width = pct+'%';
+  $('bPct').textContent = pct+'%';
+  $('bCount').textContent = d.total ? ((d.done||0)+' / '+d.total) : '';
+  $('bDetail').textContent = d.detail || (d.elapsed? ('已用 '+fmtSec(d.elapsed)) : '');
+
+  if(!d.running){
+    clearInterval(batchTimer); batchTimer=null;
+    $('b-do').disabled = false;
+    $('b-stopdl').style.display = 'none';
+    if(d.stage==='完成'){ $('bFill').style.width='100%'; $('bPct').textContent='100%'; }
+    if(d.error){ $('bDetail').textContent = d.error; }
+  }else{
+    $('b-stopdl').style.display = 'inline-block';
+  }
+}
+
+async function stopBatch(){
+  await fetch('/api/batch_stop',{method:'POST'});
+  $('bStage').textContent = '正在停止…';
+}
+
 async function pickBatchFolder(){
   const cur = $('bDest').value.trim();
   $('bDest').value = '选取中…';
@@ -497,27 +733,6 @@ async function pickBatchFolder(){
     if(r.ok && r.path){ $('bDest').value = r.path; }
     else { $('bDest').value = cur || ''; }
   }catch(e){ $('bDest').value = cur || ''; }
-}
-
-async function startBatch(){
-  const ch = $('bChannel').value.trim();
-  const dest = $('bDest').value.trim();
-  const q = $('bQuality').value;
-  if(!ch){ alert('请填写频道地址'); $('bChannel').focus(); return; }
-  if(!dest){ alert('请选择保存目录'); return; }
-
-  $('b-start').disabled = true;
-  try{
-    const r = await (await fetch('/api/save_config?channel='+encodeURIComponent(ch)
-        +'&output_dir='+encodeURIComponent(dest)+'&min_height='+q, {method:'POST'})).json();
-    if(!r.ok){ alert('保存设置失败：'+(r.error||'')); $('b-start').disabled=false; return; }
-  }catch(e){
-    alert('保存设置失败'); $('b-start').disabled=false; return;
-  }
-  hadTask = true;
-  $('statusCard').style.display='block';
-  $('batchProg').style.display='block';
-  await go('all');
 }
 
 function $(id){return document.getElementById(id)}
@@ -743,7 +958,6 @@ async function refresh(){
   // 频道地址/目录/画质：每次刷新同步到输入框（用户正在编辑时不覆盖）
   if(!$('bChannel').matches(':focus') && !$('bChannel').value) $('bChannel').value = c.channel_url||'';
   if(!$('bDest').value) $('bDest').value = c.output_dir||'';
-  if(s && c.min_height) $('bQuality').value = String(c.min_height);
 
   // 高级区的配置信息只在展开时填充
   if($('advBody').style.display!=='none'){
@@ -768,17 +982,6 @@ async function refresh(){
   document.getElementById('stage').textContent= busy? ('进行中：'+ (d.task||st.stage||'')) : '待机';
   document.getElementById('tstate').textContent= st.updated? ('更新于 '+st.updated):'';
 
-  // 批量进度条
-  if(hadTask){
-    $('batchProg').style.display='block';
-    $('bFill').style.width = pct+'%';
-    $('bPct').textContent = pct+'%';
-    $('bCount').textContent = total ? (done+' / '+total) : '';
-    $('bStage').textContent = busy ? ('进行中：'+(d.task||st.stage||'')) : ((st.stage==='report')?'已完成':'待机');
-    $('bUpdated').textContent = st.updated? ('更新于 '+st.updated):'';
-    $('b-start').disabled = busy;
-  }
-
   const log=document.getElementById('log');
   log.innerHTML=(d.events||[]).map(e=>`<div class="${e.level||'INFO'}">${esc(e.msg)}</div>`).join('');
   log.scrollTop=log.scrollHeight;
@@ -792,7 +995,6 @@ async function refresh(){
 async function go(task){
   hadTask = true;
   $('statusCard').style.display='block';
-  $('batchProg').style.display='block';
   const r=await fetch('/api/start?task='+task,{method:'POST'});
   if(!r.ok){ const j=await r.json(); alert(j.error||'启动失败'); }
   refresh();
