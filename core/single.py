@@ -283,7 +283,8 @@ def _worker(cfg, vid, dest_dir, min_height):
                               "res": ("%dx%d" % (w, h)) if h else "", "note": note})
             else:
                 _TASK["stage"] = "失败"
-                _TASK["error"] = "没有生成成品文件，请查看日志或换节点重试"
+                _TASK["error"] = ("没有生成成品文件。若下载被中断（如服务重启/手动取消），"
+                                  "目录里可能残留 .part 文件，已自动移到 _quarantine")
     except Exception as e:
         with _TASK_LOCK:
             _TASK["stage"] = "失败"
@@ -294,12 +295,22 @@ def _worker(cfg, vid, dest_dir, min_height):
 
 
 def _sweep_intermediates(d):
-    """把 .fXXX 中间流移到隔离区（只移不删）"""
+    """把中间文件移到隔离区（只移不删）
+
+    ★ 2026-10-23 补：原来只扫 .fXXX 分离流，漏了 .part。
+      用户遇到的现象：下载中途服务重启 → 目录里留下
+      "xxx.f399.mp4.part"（10MB，无音轨、无容器尾）→ 双击打不开。
+      现在 .part / .ytdl 也一并移入隔离区。
+    """
     q = d.rstrip("/\\") + "_quarantine"
+    pats = (r"\.f\d+\.(mp4|webm|m4a)$", r"\.part$", r"\.ytdl$")
     for f in os.listdir(d):
-        if re.search(r"\.f\d+\.(mp4|webm|m4a)$", f):
+        if any(re.search(p, f) for p in pats):
             try:
                 os.makedirs(q, exist_ok=True)
-                shutil.move(os.path.join(d, f), os.path.join(q, f))
+                dst = os.path.join(q, f)
+                if os.path.exists(dst):
+                    dst = os.path.join(q, "dup_" + f)
+                shutil.move(os.path.join(d, f), dst)
             except Exception:
                 pass
