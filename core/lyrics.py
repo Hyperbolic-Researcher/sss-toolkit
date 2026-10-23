@@ -128,6 +128,30 @@ def fetch(cfg, batch=25, limit=0, stop_flag=None):
     if limit:
         videos = videos[:limit]
 
+    # ★ 只处理【本地已下载】的视频。
+    #   清单可能有几百上千条（频道全量），但用户往往只下了其中几个。
+    #   不筛的话会对着 900 多个视频抓字幕，既慢又全是无意义的请求
+    #   （实测：用户下了 5 个，歌词任务却跑 906 个，看起来像"没反应"）。
+    try:
+        import glob as _g
+        have = set()
+        for f in _g.glob(os.path.join(out_dir, "*.mp4")):
+            b = os.path.basename(f)
+            if re.search(r"\.f\d+(-\d+)?\.", b):
+                continue
+            m = re.search(r"\[([A-Za-z0-9_-]{11})\]", b)
+            if m:
+                have.add(m.group(1))
+        if have:
+            before = len(videos)
+            videos = [v for v in videos if v[0] in have]
+            common.log("歌词范围：仅已下载（%d/%d 个）" % (len(videos), before))
+        else:
+            common.log("目录里没有已下载的视频，跳过", "WARN")
+            return {}
+    except Exception:
+        pass
+
     idx = {}
     if os.path.exists(idx_path(out_dir)):
         try:
@@ -158,7 +182,8 @@ def fetch(cfg, batch=25, limit=0, stop_flag=None):
 
     have = sum(1 for v in idx.values() if v.get("has_lyrics"))
     common.log("歌词任务：清单 %d，已有 %d" % (len(videos), have))
-    common.write_state(stage="lyrics", total=len(videos), done=have)
+    # done 必须是【本次任务】的进度，不能沿用索引里历史已有的数量（会出现 93/7 这种怪显示）
+    common.write_state(stage="lyrics", total=len(videos), done=0)
 
     got = 0
     for bi in range(0, len(videos), batch):

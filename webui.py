@@ -562,6 +562,7 @@ td{padding:7px 8px;border-bottom:1px solid #1e242d}
     <div style="margin-top:10px;display:flex;gap:8px">
       <button class="danger" onclick="stopBatch()" id="b-stopdl" style="font-size:12px;padding:6px 14px">停止下载</button>
       <button class="ghost" onclick="openDir()" style="font-size:12px;padding:6px 14px">打开所在目录</button>
+      <button class="ghost" onclick="copyPath()" style="font-size:12px;padding:6px 14px">复制路径</button>
     </div>
   </div>
 
@@ -589,7 +590,9 @@ td{padding:7px 8px;border-bottom:1px solid #1e242d}
       <div style="display:flex;align-items:center;gap:10px">
         <button class="ghost" onclick="openDir()"
           style="font-size:12.5px;flex:none;width:130px">打开所在目录</button>
-        <span style="font-size:11.5px;color:#5a6373">在资源管理器里打开</span>
+        <button class="ghost" onclick="copyPath()"
+          style="font-size:12px;flex:none">复制路径</button>
+        <span style="font-size:11.5px;color:#5a6373">若点了没反应，说明服务不是你自己启动的，用「复制路径」粘贴到资源管理器</span>
       </div>
     </div>
     <div id="nextRun" style="display:none;margin-top:16px;padding:12px;background:#141821;
@@ -770,6 +773,24 @@ async function pollBatch(){
 async function stopBatch(){
   await fetch('/api/batch_stop',{method:'POST'});
   $('bStage').textContent = '正在停止…';
+}
+
+async function copyPath(){
+  try{
+    const r = await (await fetch('/api/status')).json();
+    const p = (r.config||{}).output_dir || '';
+    if(!p){ alert('没有取到路径'); return; }
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      await navigator.clipboard.writeText(p);
+      alert('已复制：\n' + p + '\n\n直接粘贴到资源管理器地址栏即可打开');
+    }else{
+      // 老浏览器兜底
+      const ta = document.createElement('textarea');
+      ta.value = p; document.body.appendChild(ta); ta.select();
+      document.execCommand('copy'); document.body.removeChild(ta);
+      alert('已复制：\n' + p);
+    }
+  }catch(e){ alert('复制失败：' + e); }
 }
 
 async function pickBatchFolder(){

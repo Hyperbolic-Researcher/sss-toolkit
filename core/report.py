@@ -138,12 +138,38 @@ def load_meta_tsv(path):
     return meta
 
 
-def build(cfg):
+def build(cfg, only_downloaded=True):
+    """生成 Excel。
+
+    only_downloaded=True 时只输出【本地实际存在】的视频 ——
+    清单可能有几百条（频道全量），但用户只下了几个，
+    把未下载的也列进去会让表格里全是空行（用户反馈过这个困惑）。
+    """
     out_dir = cfg["output_dir"]
     videos = scan_mod.read_list(out_dir)
     if not videos:
         common.log("清单为空", "ERROR")
         return None
+
+    if only_downloaded:
+        try:
+            import glob as _g
+            have = set()
+            for f in _g.glob(os.path.join(out_dir, "*.mp4")):
+                b = os.path.basename(f)
+                if re.search(r"\.f\d+(-\d+)?\.", b):
+                    continue
+                m = re.search(r"\[([A-Za-z0-9_-]{11})\]", b)
+                if m:
+                    have.add(m.group(1))
+            before = len(videos)
+            videos = [v for v in videos if v[0] in have]
+            common.log("Excel 范围：仅已下载（%d/%d 个）" % (len(videos), before))
+            if not videos:
+                common.log("没有已下载的视频，无法生成清单", "WARN")
+                return None
+        except Exception:
+            pass
 
     arch = dl.load_archive(out_dir)
     lidx = {}
