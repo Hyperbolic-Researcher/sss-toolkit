@@ -1,13 +1,6 @@
 @echo off
-chcp 65001 >nul 2>&1
+chcp 936 >nul 2>&1
 cd /d "%~dp0"
-echo Starting local console...
-echo Open http://127.0.0.1:8765 in your browser if it does not open automatically.
-echo Close this window to stop the service.
-echo.
-python webui.py
-if errorlevel 1 (
-    echo.
-    echo Failed. Make sure Python is installed and run: python webui.py
-    pause
-)
+REM 这个文件只是 start_webui.bat 的入口，逻辑全部在主脚本里，
+REM 避免两份实现各自漂移（曾经因此出现 No module named yt_dlp）。
+call "%~dp0start_webui.bat" %*

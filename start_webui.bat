@@ -12,9 +12,16 @@ echo.
 REM ---- 1. 找一个装了 yt-dlp 的 Python ----
 REM 系统里可能有多个 Python，只有装了 yt-dlp 的才能用。
 set "PYEXE="
+set "C0=%~dp0.venv\Scripts\python.exe"
 set "C1=C:\Users\P775\.workbuddy\binaries\python\envs\default\Scripts\python.exe"
 set "C2=C:\Users\P775\.workbuddy\binaries\python\versions\3.13.12\python.exe"
 
+if "!PYEXE!"=="" (
+    if exist "!C0!" (
+        "!C0!" -c "import yt_dlp" >nul 2>&1
+        if not errorlevel 1 set "PYEXE=!C0!"
+    )
+)
 if exist "!C1!" (
     "!C1!" -c "import yt_dlp" >nul 2>&1
     if not errorlevel 1 set "PYEXE=!C1!"
