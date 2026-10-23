@@ -6,6 +6,59 @@
 
 ---
 
+## ⚠️ 使用边界（请先读）
+
+**这是一个个人学习研究项目，不是商业产品。**
+
+| 可以 | 不可以 |
+|---|---|
+| 个人学习、研究 yt-dlp 工程实践 | 商业分发、售卖资源包 |
+| 给孩子离线看儿歌 | 二次上传 / 公开提供下载 |
+| 学习 ctypes / 标准库做界面 | 绕过付费墙、破解 DRM |
+
+**代码是 MIT（自由使用），但你用它下载的内容版权归原作者。**
+判断标准很简单：**你的行为是否替代了别人付费获取的渠道？**
+
+完整说明见 **[DISCLOSURE.md](DISCLOSURE.md)**。
+
+---
+
+## 📖 文档索引
+
+| 文档 | 内容 |
+|---|---|
+| **[docs/问题与解决手册.md](docs/问题与解决手册.md)** | **踩过的所有坑 + 解法（按症状查）** ⭐ |
+| [PREFLIGHT.md](PREFLIGHT.md) | 开工前必读：三条必查 + 铁律 + 已知死路 |
+| [docs/手机端使用.md](docs/手机端使用.md) | 手机遥控、内网穿透、手机看视频 |
+| [docs/支持的网站.md](docs/支持的网站.md) | 1752 个站点中主流站点的实测支持情况 |
+| [DISCLOSURE.md](DISCLOSURE.md) | 使用边界与合规说明 |
+| [docs/发布到GitHub.md](docs/发布到GitHub.md) | 首次发布流程 |
+
+---
+
+## 快速开始
+
+```bash
+# 1. 克隆到本地
+git clone https://github.com/Hyperbolic-Researcher/sss-toolkit.git
+cd sss-toolkit
+
+# 2. 装依赖
+pip install -U yt-dlp openpyxl imageio-ffmpeg
+
+# 3. 启动
+#    Windows：双击 start_webui.bat
+#    或命令行：python webui.py --lan
+```
+
+浏览器打开 `http://127.0.0.1:8765`。
+
+> **Windows 用户注意**：如果你的电脑装过多个 Python，
+> `start_webui.bat` 会自动找出装了 yt-dlp 的那个。
+> 详见 [问题与解决手册 A3](docs/问题与解决手册.md#a3-多个-python-导致缺依赖)。
+
+---
+
 ## 它能做什么
 
 | 能力 | 说明 |
