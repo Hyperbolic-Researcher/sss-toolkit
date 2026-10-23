@@ -279,7 +279,15 @@ height:340px;overflow-y:auto;font:12px/1.65 ui-monospace,Consolas,monospace;whit
   </div>
 </div>
 
-<div class="card">
+<div class="card" style="border-color:#242a33">
+  <div style="display:flex;align-items:center;justify-content:space-between">
+    <div style="display:flex;align-items:center;gap:8px">
+      <span style="font-size:14px;font-weight:600;color:var(--dim)">频道批量任务</span>
+      <span style="color:#5a6373;font-size:11.5px">（整频道下载 / 歌词 / 报表，一般用不到）</span>
+    </div>
+    <button class="ghost" onclick="toggleBatch()" id="btnBatch" style="font-size:12px;padding:5px 12px">展开</button>
+  </div>
+  <div id="batchBody" style="display:none;margin-top:14px">
   <div class="meta" id="meta"></div>
   <div class="row">
     <button onclick="go('check')" id="b-check">体检</button>
@@ -291,15 +299,16 @@ height:340px;overflow-y:auto;font:12px/1.65 ui-monospace,Consolas,monospace;whit
     <button class="danger" onclick="stop()" id="b-stop">停止</button>
     <button class="ghost" onclick="openDir()">打开输出目录</button>
   </div>
+  </div>
 </div>
 
-<div class="card">
+<div class="card" id="statusCard" style="display:none">
   <div class="stat"><span id="stage">待机</span><span id="pct">0%</span></div>
   <div class="bar"><i id="fill"></i></div>
   <div class="stat"><span id="count">0 / 0</span><span id="tstate"></span></div>
 </div>
 
-<div class="card">
+<div class="card" id="logCard" style="display:none">
   <div style="color:var(--dim);font-size:12px;margin-bottom:8px">运行日志</div>
   <div class="log" id="log"></div>
 </div>
@@ -310,6 +319,16 @@ let busy=false;
 
 // ══ 单视频下载 ══
 let probeTimer=null, dlTimer=null, lastUrl="", lastFile="", lastDest="";
+// ★ 只有本页面真正跑过任务，才显示状态条和日志；刷新后不显示历史残留
+let hadTask=false;
+
+function toggleBatch(){
+  const b=$('batchBody'), btn=$('btnBatch');
+  const open = b.style.display!=='none';
+  b.style.display = open ? 'none' : 'block';
+  btn.textContent = open ? '展开' : '收起';
+  if(!open) refresh();   // 展开时立刻填充配置信息
+}
 
 function $(id){return document.getElementById(id)}
 
@@ -356,15 +375,11 @@ async function doProbe(manual){
     $('vMeta').innerHTML = bits.join(' · ');
     $('probeBox').style.display='block';
 
-    // 保存目录候选
-    const dl = $('destList');
-    if(!dl.dataset.filled){
-      dl.innerHTML = '<option value="E://SuperSimpleSongs"><option value="E://SuperSimpleSongs_低清归档">';
-      dl.dataset.filled='1';
-    }
-    if(!$('dlDest').value) $('dlDest').value = 'E://SuperSimpleSongs';
+    // 首次解析时给个默认目录（之后保留用户自己选的）
+    if(!$('dlDest').value) $('dlDest').value = 'E:/SuperSimpleSongs';
   }catch(e){
-    $('probeMsg').innerHTML = '<span style="color:var(--err)">请求失败：'+esc(String(e))+'</span>';
+    // 到这一步说明接口已返回成功、是前端渲染出错，不能再叫「请求失败」，否则误导
+    $('probeMsg').innerHTML = '<span style="color:var(--warn)">页面渲染异常：'+esc(String(e))+'（解析结果已拿到）</span>';
   }
 }
 
@@ -467,11 +482,14 @@ async function refresh(){
   let d;
   try{ d=await (await fetch('/api/status')).json(); }catch(e){ return; }
   const c=d.config, st=d.state||{}, t=d.tools;
-  document.getElementById('meta').innerHTML=`
-    <div class="kv"><div class="k">输出目录</div><div class="v">${esc(c.output_dir)}</div></div>
-    <div class="kv"><div class="k">频道</div><div class="v">${esc(c.channel_url||'未设置')}</div></div>
-    <div class="kv"><div class="k">画质门槛</div><div class="v">${c.min_height}p 以上（不降清）</div></div>
-    <div class="kv"><div class="k">工具链</div><div class="v">${dot(t.ffmpeg)}ffmpeg ${dot(t.deno)}deno ${dot(t.aria2)}aria2</div></div>`;
+  // 批量配置信息只在展开时填充，避免一打开页面就看到一堆历史
+  if($('batchBody').style.display!=='none'){
+    document.getElementById('meta').innerHTML=`
+      <div class="kv"><div class="k">输出目录</div><div class="v">${esc(c.output_dir)}</div></div>
+      <div class="kv"><div class="k">频道</div><div class="v">${esc(c.channel_url||'未设置')}</div></div>
+      <div class="kv"><div class="k">画质门槛</div><div class="v">${c.min_height}p 以上（不降清）</div></div>
+      <div class="kv"><div class="k">工具链</div><div class="v">${dot(t.ffmpeg)}ffmpeg ${dot(t.deno)}deno ${dot(t.aria2)}aria2</div></div>`;
+  }
 
   busy=d.busy;
   ['check','scan','download','lyrics','report','all'].forEach(k=>{
@@ -490,9 +508,16 @@ async function refresh(){
   const log=document.getElementById('log');
   log.innerHTML=(d.events||[]).map(e=>`<div class="${e.level||'INFO'}">${esc(e.msg)}</div>`).join('');
   log.scrollTop=log.scrollHeight;
+
+  // 状态条与日志：只有本次页面跑过任务才显示，避免刷新后看到上次的历史
+  $('statusCard').style.display = hadTask ? 'block' : 'none';
+  $('logCard').style.display = (hadTask && (d.events||[]).length) ? 'block' : 'none';
+
 }
 
 async function go(task){
+  hadTask = true;
+  $('statusCard').style.display='block';
   const r=await fetch('/api/start?task='+task,{method:'POST'});
   if(!r.ok){ const j=await r.json(); alert(j.error||'启动失败'); }
   refresh();
