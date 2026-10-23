@@ -340,8 +340,13 @@ height:340px;overflow-y:auto;font:12px/1.65 ui-monospace,Consolas,monospace;whit
 border-radius:50%;animation:spin .8s linear infinite;flex:none}
 tr.row:hover{background:#161b24}
 td{padding:7px 8px;border-bottom:1px solid #1e242d}
-td.ttl{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#d7dce4}
-td.ttl:hover{color:#fff}
+.lhead{display:flex;align-items:center;gap:10px;padding:8px 10px;background:#141821;
+  position:sticky;top:0;z-index:1;color:var(--dim);font-size:12px;border-bottom:1px solid #1e242d}
+.lrow{display:flex;align-items:center;gap:10px;padding:8px 10px;border-bottom:1px solid #1e242d}
+.lrow:hover{background:#161b24}
+.lrow .ttl{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#d7dce4}
+.lrow .dur{width:64px;flex:none;text-align:right;color:var(--dim);font-size:12px}
+.lrow .size{width:92px;flex:none;text-align:right;color:var(--dim);font-size:12px}
 </style>
 </head>
 <body><div class="wrap">
@@ -519,23 +524,13 @@ td.ttl:hover{color:#fff}
     </div>
 
     <div style="max-height:340px;overflow-y:auto;border:1px solid var(--line);border-radius:8px">
-      <table style="width:100%;border-collapse:collapse;font-size:12.5px;table-layout:fixed">
-        <colgroup>
-          <col style="width:40px" />
-          <col />
-          <col style="width:74px" />
-          <col style="width:96px" />
-        </colgroup>
-        <thead>
-          <tr style="background:#141821;position:sticky;top:0">
-            <th style="padding:8px;text-align:center"></th>
-            <th style="text-align:left;padding:8px;color:var(--dim);font-weight:500">标题</th>
-            <th style="padding:8px;text-align:right;color:var(--dim);font-weight:500">时长</th>
-            <th style="padding:8px;text-align:right;color:var(--dim);font-weight:500">预估大小</th>
-          </tr>
-        </thead>
-        <tbody id="listBody"></tbody>
-      </table>
+      <div class="lhead">
+        <div style="width:26px;flex:none"></div>
+        <div style="flex:1;min-width:0">标题</div>
+        <div style="width:64px;flex:none;text-align:right">时长</div>
+        <div style="width:92px;flex:none;text-align:right">预估大小</div>
+      </div>
+      <div id="listBody"></div>
     </div>
 
     <div style="display:flex;gap:14px;align-items:center;margin:14px 0;flex-wrap:wrap">
@@ -683,21 +678,26 @@ function renderList(){
   const kw = ($('listFilter').value||'').trim().toLowerCase();
   const rows = scanItems.filter(x => !kw || (x.title||'').toLowerCase().includes(kw));
   const body = $('listBody');
-  if(!rows.length){ body.innerHTML = '<tr><td colspan="4" style="padding:16px;text-align:center;color:var(--dim)">没有匹配的视频</td></tr>'; }
-  else {
-    body.innerHTML = rows.map(x=>{
-      const on = selSet.has(x.id);
-      return '<tr class="row">'
-        + '<td style="text-align:center"><input type="checkbox" '+(on?'checked':'')+' onchange="toggleOne(\''+x.id+'\',this.checked)" style="width:14px;height:14px;cursor:pointer" /></td>'
-        + '<td class="ttl" title="'+esc(x.title||x.id)+'">'+esc(x.title||x.id)+'</td>' 
-        + '<td style="text-align:right;color:var(--dim);white-space:nowrap">'+(x.dur_text||'')+'</td>' 
-        + '<td style="text-align:right;color:var(--dim);white-space:nowrap">'+(x.size_mb?('~'+x.size_mb+' MB'):'—')+'</td>' 
-        + '</tr>';
+  if(!rows.length){
+    body.innerHTML = '<div style="padding:20px;text-align:center;color:var(--dim);font-size:12.5px">没有匹配的视频</div>';
+  } else {
+    body.innerHTML = rows.map(function(x){
+      const on = selSet.has(x.id) ? 'checked' : '';
+      const t = esc(x.title || x.id);
+      return '<div class="lrow">'
+        + '<div style="width:26px;flex:none;text-align:center">'
+        + '<input type="checkbox" ' + on + ' onchange="toggleOne(\'' + x.id + '\',this.checked)" '
+        + 'style="width:14px;height:14px;cursor:pointer" /></div>'
+        + '<div class="ttl" title="' + t + '">' + t + '</div>'
+        + '<div class="dur">' + (x.dur_text || '') + '</div>'
+        + '<div class="size">' + (x.size_mb ? ('~' + x.size_mb + ' MB') : '—') + '</div>'
+        + '</div>';
     }).join('');
   }
   $('listStat').textContent = '共 ' + scanItems.length + ' 个 · 已选 ' + selSet.size;
   const ca = $('chkAll');
-  if(ca){ ca.checked = scanItems.length>0 && selSet.size===scanItems.length; ca.indeterminate = selSet.size>0 && selSet.size<scanItems.length; }
+  if(ca){ ca.checked = scanItems.length>0 && selSet.size===scanItems.length;
+          ca.indeterminate = selSet.size>0 && selSet.size<scanItems.length; }
 }
 
 function toggleOne(id, on){ on ? selSet.add(id) : selSet.delete(id); renderList(); }
