@@ -152,24 +152,33 @@ def build(cfg, only_downloaded=True):
         return None
 
     if only_downloaded:
+        # ★ 与 lyrics 同理：以目录里的 mp4 为准，videos.txt 只补标题。
+        #   否则清单不全时 Excel 会漏掉已下载的视频。
         try:
             import glob as _g
-            have = set()
-            for f in _g.glob(os.path.join(out_dir, "*.mp4")):
+            tmap = {v[0]: v for v in videos}
+            found = []
+            for f in sorted(_g.glob(os.path.join(out_dir, "*.mp4"))):
                 b = os.path.basename(f)
-                if re.search(r"\.f\d+(-\d+)?\.", b):
+                if re.search(r"\.f\d+(-\d+)?\.", b) or b.endswith("_无音轨.mp4"):
                     continue
                 m = re.search(r"\[([A-Za-z0-9_-]{11})\]", b)
-                if m:
-                    have.add(m.group(1))
-            before = len(videos)
-            videos = [v for v in videos if v[0] in have]
-            common.log("Excel 范围：仅已下载（%d/%d 个）" % (len(videos), before))
-            if not videos:
+                if not m:
+                    continue
+                vid = m.group(1)
+                if vid in tmap:
+                    found.append(tmap[vid])
+                else:
+                    title = re.sub(r"\s*\[[A-Za-z0-9_-]{11}\]\.mp4$", "", b)
+                    found.append((vid, "", "0", title))
+            if found:
+                common.log("Excel 范围：目录内 %d 个视频（清单 %d 条）" % (len(found), len(videos)))
+                videos = found
+            else:
                 common.log("没有已下载的视频，无法生成清单", "WARN")
                 return None
-        except Exception:
-            pass
+        except Exception as e:
+            common.log("扫描目录失败：%s" % str(e)[:80], "WARN")
 
     arch = dl.load_archive(out_dir)
     lidx = {}

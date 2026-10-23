@@ -132,25 +132,36 @@ def fetch(cfg, batch=25, limit=0, stop_flag=None):
     #   清单可能有几百上千条（频道全量），但用户往往只下了其中几个。
     #   不筛的话会对着 900 多个视频抓字幕，既慢又全是无意义的请求
     #   （实测：用户下了 5 个，歌词任务却跑 906 个，看起来像"没反应"）。
+    # ★ 以【目录里的 mp4】为唯一依据，不再依赖 videos.txt。
+    #   踩过的坑：videos.txt 可能只有 2 条（某次批量写入的），而目录里有 7 个视频，
+    #   做交集后只处理 2 个 —— 用户以为"歌词功能坏了"。
+    #   清单只用来补充时长/标题，缺了也不影响。
     try:
         import glob as _g
-        have = set()
-        for f in _g.glob(os.path.join(out_dir, "*.mp4")):
+        title_map = {v[0]: v for v in videos}
+        found = []
+        for f in sorted(_g.glob(os.path.join(out_dir, "*.mp4"))):
             b = os.path.basename(f)
-            if re.search(r"\.f\d+(-\d+)?\.", b):
+            if re.search(r"\.f\d+(-\d+)?\.", b) or b.endswith("_无音轨.mp4"):
                 continue
             m = re.search(r"\[([A-Za-z0-9_-]{11})\]", b)
-            if m:
-                have.add(m.group(1))
-        if have:
-            before = len(videos)
-            videos = [v for v in videos if v[0] in have]
-            common.log("歌词范围：仅已下载（%d/%d 个）" % (len(videos), before))
+            if not m:
+                continue
+            vid = m.group(1)
+            if vid in title_map:
+                found.append(title_map[vid])
+            else:
+                # 清单里没有 → 从文件名反推标题
+                title = re.sub(r"\s*\[[A-Za-z0-9_-]{11}\]\.mp4$", "", b)
+                found.append((vid, "", "0", title))
+        if found:
+            common.log("歌词范围：目录内 %d 个视频（清单 %d 条）" % (len(found), len(videos)))
+            videos = found
         else:
             common.log("目录里没有已下载的视频，跳过", "WARN")
             return {}
-    except Exception:
-        pass
+    except Exception as e:
+        common.log("扫描目录失败：%s" % str(e)[:80], "WARN")
 
     idx = {}
     if os.path.exists(idx_path(out_dir)):
