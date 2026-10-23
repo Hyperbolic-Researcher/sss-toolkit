@@ -516,11 +516,6 @@ async function pickFolder(){
   }
 }
 
-function openDest(){
-  const d = $('dlDest').value.trim() || lastDest;
-  if(d) fetch('/api/open_folder?path='+encodeURIComponent(d));
-}
-
 function esc(s){return String(s).replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]))}
 function dot(ok){return `<span class="dot ${ok?'on':'off'}"></span>`}
 
