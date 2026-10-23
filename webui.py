@@ -340,6 +340,8 @@ height:340px;overflow-y:auto;font:12px/1.65 ui-monospace,Consolas,monospace;whit
 border-radius:50%;animation:spin .8s linear infinite;flex:none}
 tr.row:hover{background:#161b24}
 td{padding:7px 8px;border-bottom:1px solid #1e242d}
+td.ttl{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:0;color:#d7dce4}
+td.ttl:hover{color:#fff}
 </style>
 </head>
 <body><div class="wrap">
@@ -436,6 +438,26 @@ td{padding:7px 8px;border-bottom:1px solid #1e242d}
       <button class="ghost" onclick="hideFix()" style="flex:none">关闭提示</button>
     </div>
   </div>
+
+  <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line);
+       font-size:11.5px;color:#5a6373;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+    <span>支持 YouTube / B站 / 抖音 / 小红书 / 微博 / TikTok / Vimeo / Twitch 等 1752 个站点</span>
+    <span onclick="toggleSites()" style="color:var(--acc);cursor:pointer;user-select:none"
+      id="sitesToggle">查看完整列表</span>
+  </div>
+  <div id="sitesList" style="display:none;margin-top:10px;padding:12px;background:#141821;
+       border:1px solid var(--line);border-radius:8px;font-size:11.5px;line-height:2">
+    <div style="color:var(--ok);margin-bottom:6px;font-weight:600">支持</div>
+    <div style="color:#9aa3b0">YouTube · Bilibili(B站) · 抖音 · 小红书 · 微博 · TikTok ·
+      Instagram · Twitter/X · Facebook · Reddit · Pinterest · Tumblr · Vimeo · Dailymotion ·
+      优酷 · 爱奇艺 · 腾讯视频 · Twitch · SoundCloud · TED</div>
+    <div style="color:var(--err);margin:10px 0 6px;font-weight:600">不支持</div>
+    <div style="color:#9aa3b0">微信视频号（生态封闭，无解） · 快手（无解析器）</div>
+    <div style="color:#5a6373;margin-top:10px">
+      判断方法：把链接粘到上面能不能解析出来就知道。支持 ≠ 能拿高清，
+      也 ≠ 可以随便用于商业分发。
+    </div>
+  </div>
 </div>
 
 <div class="card" style="border-color:#2a3340">
@@ -486,10 +508,8 @@ td{padding:7px 8px;border-bottom:1px solid #1e242d}
   <!-- 步骤二：列表 -->
   <div id="listBox" style="display:none;margin-top:16px">
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
-      <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;cursor:pointer">
-        <input type="checkbox" id="chkAll" onchange="toggleAll(this.checked)"
-          style="width:15px;height:15px;cursor:pointer" /> 全选
-      </label>
+      <button class="ghost" onclick="toggleAll(true)" style="font-size:12px;padding:5px 12px">全选</button>
+      <button class="ghost" onclick="toggleAll(false)" style="font-size:12px;padding:5px 12px">取消全选</button>
       <span id="listStat" style="color:var(--dim);font-size:12px"></span>
       <input id="listFilter" placeholder="搜索标题…" oninput="renderList()"
         style="margin-left:auto;background:#0b0e13;border:1px solid var(--line);color:var(--txt);
@@ -497,13 +517,19 @@ td{padding:7px 8px;border-bottom:1px solid #1e242d}
     </div>
 
     <div style="max-height:340px;overflow-y:auto;border:1px solid var(--line);border-radius:8px">
-      <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+      <table style="width:100%;border-collapse:collapse;font-size:12.5px;table-layout:fixed">
+        <colgroup>
+          <col style="width:40px" />
+          <col />
+          <col style="width:74px" />
+          <col style="width:96px" />
+        </colgroup>
         <thead>
           <tr style="background:#141821;position:sticky;top:0">
-            <th style="width:36px;padding:8px;text-align:center"></th>
+            <th style="padding:8px;text-align:center"></th>
             <th style="text-align:left;padding:8px;color:var(--dim);font-weight:500">标题</th>
-            <th style="width:70px;padding:8px;text-align:right;color:var(--dim);font-weight:500">时长</th>
-            <th style="width:90px;padding:8px;text-align:right;color:var(--dim);font-weight:500">预估大小</th>
+            <th style="padding:8px;text-align:right;color:var(--dim);font-weight:500">时长</th>
+            <th style="padding:8px;text-align:right;color:var(--dim);font-weight:500">预估大小</th>
           </tr>
         </thead>
         <tbody id="listBody"></tbody>
@@ -541,32 +567,68 @@ td{padding:7px 8px;border-bottom:1px solid #1e242d}
     </div>
   </div>
 
-  <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line)">
-    <button class="ghost" onclick="toggleAdv()" id="btnAdv" style="font-size:12px;padding:6px 14px">更多操作</button>
-    <div id="advBody" style="display:none;margin-top:12px">
-      <div style="color:var(--dim);font-size:11.5px;margin-bottom:8px">单步执行（一般用不到）</div>
-      <div class="row">
-        <button class="ghost" onclick="go('check')" id="b-check" style="font-size:12.5px">环境体检</button>
-        <button class="ghost" onclick="go('lyrics')" id="b-lyrics" style="font-size:12.5px">抓歌词</button>
-        <button class="ghost" onclick="go('report')" id="b-report" style="font-size:12.5px">生成 Excel</button>
-        <button class="ghost" onclick="openDir()" style="font-size:12.5px">打开输出目录</button>
+  <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--line)">
+    <button class="ghost" onclick="toggleAdv()" id="btnAdv" style="font-size:12px;padding:6px 14px">高级操作</button>
+    <div id="advBody" style="display:none;margin-top:14px">
+
+      <div style="background:#141821;border:1px solid var(--line);border-radius:8px;
+           padding:10px 12px;margin-bottom:14px">
+        <div style="font-size:12px;color:#8b95a5;line-height:1.75">
+          下面几项针对<b style="color:#c3c9d2">已经下载到本地的视频</b>，与上方的下载任务<b>互不影响</b>，可单独执行。<br>
+          执行时会出现进度条，随时可以点「停止」；<b style="color:#c3c9d2">中途停止不会损坏已下载的视频</b>。
+        </div>
       </div>
-      <div id="meta" class="meta" style="margin-top:12px"></div>
+
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <div style="display:flex;align-items:flex-start;gap:12px">
+          <button class="ghost" onclick="go('check')" id="b-check"
+            style="font-size:12.5px;flex:none;width:104px">检查环境</button>
+          <div style="font-size:11.5px;color:#7c8593;line-height:1.6;padding-top:6px">
+            测试代理、POT 服务、能不能取到高清流。只做探测，<b>不会下载任何文件</b>
+          </div>
+        </div>
+        <div style="display:flex;align-items:flex-start;gap:12px">
+          <button class="ghost" onclick="go('lyrics')" id="b-lyrics"
+            style="font-size:12.5px;flex:none;width:104px">抓取歌词</button>
+          <div style="font-size:11.5px;color:#7c8593;line-height:1.6;padding-top:6px">
+            给已下载的视频抓官方字幕，生成 .srt（带时间轴）/ .lrc / .txt
+          </div>
+        </div>
+        <div style="display:flex;align-items:flex-start;gap:12px">
+          <button class="ghost" onclick="go('report')" id="b-report"
+            style="font-size:12.5px;flex:none;width:104px">生成 Excel</button>
+          <div style="font-size:11.5px;color:#7c8593;line-height:1.6;padding-top:6px">
+            把已下载的视频整理成表格：标题、画质、分类、难度、歌词路径等
+          </div>
+        </div>
+        <div style="display:flex;align-items:flex-start;gap:12px">
+          <button class="ghost" onclick="openDir()"
+            style="font-size:12.5px;flex:none;width:104px">打开目录</button>
+          <div style="font-size:11.5px;color:#7c8593;line-height:1.6;padding-top:6px">
+            在资源管理器里打开保存目录
+          </div>
+        </div>
+      </div>
+
+      <div id="advRun" style="display:none;margin-top:16px;padding:12px;background:#141821;
+           border:1px solid var(--line);border-radius:8px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+          <div class="spin" id="advSpin"></div>
+          <span id="advStage" style="font-size:12.5px;color:var(--txt)"></span>
+          <span id="advPct" style="margin-left:auto;font-size:12px;color:var(--dim)"></span>
+          <button class="danger" onclick="stopAdv()" id="advStop"
+            style="font-size:12px;padding:5px 14px;flex:none">停止</button>
+        </div>
+        <div class="bar"><i id="advFill"></i></div>
+        <div id="advNote" style="color:#5a6373;font-size:11.5px;margin-top:8px"></div>
+      </div>
+
+      <div id="meta" class="meta" style="margin-top:14px"></div>
     </div>
   </div>
 </div>
 
-<div class="card" id="statusCard"  style="display:none">
-  <div class="stat"><span id="stage">待机</span><span id="pct">0%</span></div>
-  <div class="bar"><i id="fill"></i></div>
-  <div class="stat"><span id="count">0 / 0</span><span id="tstate"></span></div>
-</div>
-
-<div class="card" id="logCard" style="display:none">
-  <div style="color:var(--dim);font-size:12px;margin-bottom:8px">运行日志</div>
-  <div class="log" id="log"></div>
-</div>
-</div>
+div>
 
 <script>
 let busy=false;
@@ -660,7 +722,6 @@ function renderList(){
     }).join('');
   }
   $('listStat').textContent = '共 ' + scanItems.length + ' 个 · 已选 ' + selSet.size;
-  $('chkAll').checked = scanItems.length>0 && selSet.size===scanItems.length;
 }
 
 function toggleOne(id, on){ on ? selSet.add(id) : selSet.delete(id); renderList(); }
@@ -943,6 +1004,13 @@ async function showFixPanel(gap){
 
 function hideFix(){ $('fixPanel').style.display='none'; }
 
+function toggleSites(){
+  const b = $('sitesList'), t = $('sitesToggle');
+  const open = b.style.display !== 'none';
+  b.style.display = open ? 'none' : 'block';
+  t.textContent = open ? '查看完整列表' : '收起';
+}
+
 function retryDownload(){
   hideFix();
   startDl();
@@ -982,22 +1050,56 @@ async function refresh(){
   document.getElementById('stage').textContent= busy? ('进行中：'+ (d.task||st.stage||'')) : '待机';
   document.getElementById('tstate').textContent= st.updated? ('更新于 '+st.updated):'';
 
-  const log=document.getElementById('log');
-  log.innerHTML=(d.events||[]).map(e=>`<div class="${e.level||'INFO'}">${esc(e.msg)}</div>`).join('');
-  log.scrollTop=log.scrollHeight;
-
-  // 状态条与日志：只有本次页面跑过任务才显示，避免刷新后看到上次的历史
-  $('statusCard').style.display = hadTask ? 'block' : 'none';
-  $('logCard').style.display = (hadTask && (d.events||[]).length) ? 'block' : 'none';
-
+  // 高级操作区的任务进度
+  if(hadTask && $('advBody').style.display!=='none'){
+    $('advRun').style.display = 'block';
+    $('advFill').style.width = pct+'%';
+    $('advPct').textContent = total ? (pct+'%') : '';
+    if(busy){
+      $('advSpin').style.display = 'block';
+      $('advStop').style.display = 'inline-block';
+      $('advStop').disabled = false;
+      $('advStage').textContent = (TASK_NAMES[d.task]||d.task||'处理中') +
+        (total ? ('  '+done+' / '+total) : ' …');
+      $('advNote').textContent = '可以随时点「停止」，已下载的文件不会受影响';
+    }else{
+      $('advSpin').style.display = 'none';
+      $('advStop').style.display = 'none';
+      if(st.stage==='report' && st.file){
+        $('advStage').textContent = 'Excel 已生成';
+        $('advNote').textContent = st.file;
+      }else if(st.updated){
+        $('advStage').textContent = '已完成';
+        $('advNote').textContent = '更新于 ' + st.updated;
+      }else{
+        $('advStage').textContent = '待机';
+      }
+    }
+  }
 }
+
+const TASK_NAMES = {check:'检查环境', scan:'抓取清单', download:'下载视频',
+                    lyrics:'抓取歌词', 'lyrics-desc':'抓取歌词', report:'生成 Excel', all:'全流程'};
 
 async function go(task){
   hadTask = true;
-  $('statusCard').style.display='block';
-  const r=await fetch('/api/start?task='+task,{method:'POST'});
-  if(!r.ok){ const j=await r.json(); alert(j.error||'启动失败'); }
+  $('advRun').style.display = 'block';
+  $('advStage').textContent = (TASK_NAMES[task]||task) + ' 启动中…';
+  $('advPct').textContent = '';
+  $('advFill').style.width = '0%';
+  $('advNote').textContent = '';
+  $('advStop').style.display = 'inline-block';
+  $('advSpin').style.display = 'block';
+
+  const r = await fetch('/api/start?task='+task,{method:'POST'});
+  if(!r.ok){ const j=await r.json(); alert(j.error||'启动失败'); $('advRun').style.display='none'; }
   refresh();
+}
+
+async function stopAdv(){
+  await fetch('/api/stop',{method:'POST'});
+  $('advStage').textContent = '正在停止…（当前批次结束后生效）';
+  $('advStop').disabled = true;
 }
 async function stop(){ await fetch('/api/stop',{method:'POST'}); refresh(); }
 async function openDir(){ await fetch('/api/open'); }
