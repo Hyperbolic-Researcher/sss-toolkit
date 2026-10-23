@@ -52,11 +52,31 @@ ID_PATTERNS = [
 
 
 def extract_id(url):
+    """只针对 YouTube 提取 11 位 ID；其他站点返回空串"""
     url = (url or "").strip()
     for p in ID_PATTERNS:
         m = re.search(p, url)
         if m:
             return m.group(1)
+    return ""
+
+
+def normalize_url(url):
+    """把用户输入统一成可下载的 URL。
+
+    ★ 这个工具不只支持 YouTube —— 底层 yt-dlp 有 1752 个站点。
+      原来的实现只认 11 位 YouTube ID，导致 B站 / 小红书 的链接
+      直接被判"找不到视频 ID"（用户实测踩到）。
+      现在：YouTube 链接走标准形式，其他站点原样使用。
+    """
+    url = (url or "").strip()
+    if not url:
+        return ""
+    vid = extract_id(url)
+    if vid:
+        return "https://www.youtube.com/watch?v=" + vid
+    if url.startswith(("http://", "https://")):
+        return url
     return ""
 
 
@@ -79,14 +99,15 @@ def base_args(cfg):
 
 
 def probe(cfg, url):
-    """解析视频元信息 + 可用最高画质。返回 dict。"""
+    """解析视频元信息 + 可用最高画质。支持 YouTube 及其他所有站点。"""
+    target = normalize_url(url)
+    if not target:
+        return {"ok": False, "error": "请粘贴完整的网址（需以 http:// 或 https:// 开头）"}
     vid = extract_id(url)
-    if not vid:
-        return {"ok": False, "error": "链接里找不到视频 ID，请检查是否完整"}
     args = base_args(cfg) + [
         "--skip-download",
         "--print", "%(title)s\t%(duration)s\t%(uploader)s\t%(view_count)s\t%(upload_date)s",
-        "https://www.youtube.com/watch?v=" + vid,
+        target,
     ]
     try:
         r = subprocess.run(args, capture_output=True, text=True,
@@ -119,7 +140,7 @@ def probe(cfg, url):
     # 查可用最高画质
     best_h, best_fid = 0, ""
     try:
-        r2 = subprocess.run(base_args(cfg) + ["-F", "https://www.youtube.com/watch?v=" + vid],
+        r2 = subprocess.run(base_args(cfg) + ["-F", target],
                             capture_output=True, text=True, env=common.env_no_proxy(),
                             timeout=90, encoding="utf-8", errors="replace")
         for line in (r2.stdout or "").split("\n"):
@@ -136,7 +157,7 @@ def probe(cfg, url):
         "uploader": uploader, "views": views,
         "upload_date": ("%s-%s-%s" % (upd[:4], upd[4:6], upd[6:8])) if len(upd) == 8 else "",
         "max_height": best_h, "max_fid": best_fid,
-        "url": "https://www.youtube.com/watch?v=" + vid,
+        "url": target,
     }
 
 
@@ -158,26 +179,28 @@ def start_download(cfg, url, dest_dir, min_height=None, outputs=None):
     with _TASK_LOCK:
         if _TASK["running"]:
             return False, "已有下载任务在进行，请等它完成"
-        vid = extract_id(url)
-        if not vid:
-            return False, "链接无效"
+        target = normalize_url(url)
+        if not target:
+            return False, "请粘贴完整的网址"
+        vid = extract_id(url) or ""
         _TASK.update({
-            "running": True, "url": url, "title": "", "dest": dest_dir,
+            "running": True, "url": target, "title": "", "dest": dest_dir,
             "percent": 0.0, "speed": "", "eta": "", "stage": "准备中",
             "file": "", "error": "", "started": time.time(),
             "files": [], "outputs": outputs, "quality_gap": None,
         })
         _STOP["flag"] = False
 
-    t = threading.Thread(target=_worker, args=(cfg, vid, dest_dir, min_height, outputs), daemon=True)
+    t = threading.Thread(target=_worker, args=(cfg, target, vid, dest_dir, min_height, outputs), daemon=True)
     t.start()
     return True, "已开始"
 
 
-def _source_max_height(cfg, vid):
+def _source_max_height(cfg, target):
     """查源站该视频最高可用视频流高度。失败返回 0（不阻断流程）"""
-    args = base_args(cfg) + ["-F", "--no-warnings", "--socket-timeout", "25",
-                             "https://www.youtube.com/watch?v=" + vid]
+    if not target:
+        return 0
+    args = base_args(cfg) + ["-F", "--no-warnings", "--socket-timeout", "25", target]
     try:
         r = subprocess.run(args, capture_output=True, text=True,
                            env=common.env_no_proxy(), timeout=90,
@@ -209,7 +232,7 @@ def _ffmpeg_make(ff, src, dst, video=True):
         return False
 
 
-def _worker(cfg, vid, dest_dir, min_height, outputs=None):
+def _worker(cfg, target, vid, dest_dir, min_height, outputs=None):
     outputs = outputs or ["video"]
     want_video = "video" in outputs
     want_noaudio = "noaudio" in outputs
@@ -243,7 +266,7 @@ def _worker(cfg, vid, dest_dir, min_height, outputs=None):
             "--no-write-thumbnail", "--no-write-description",
             "--windows-filenames", "--newline", "--progress",
             "-o", os.path.join(dest_dir, "%(title).120B [%(id)s].%(ext)s"),
-            "https://www.youtube.com/watch?v=" + vid,
+            target,
         ]
         if adv.get("keep_video", True):
             args.append("--keep-video")
@@ -287,7 +310,9 @@ def _worker(cfg, vid, dest_dir, min_height, outputs=None):
         found = ""
         if last_target and os.path.exists(last_target):
             found = last_target
-        else:
+        elif vid:
+            # 仅 YouTube 有 11 位 ID 可用来匹配文件名；
+            # 其他站点走 last_target（yt-dlp 的 Destination 输出）
             exts = (".mp4",) if need_full else (".m4a", ".mp3", ".opus", ".webm", ".mp4")
             for f in sorted(os.listdir(dest_dir)):
                 if (vid in f and f.endswith(exts)
@@ -352,7 +377,7 @@ def _worker(cfg, vid, dest_dir, min_height, outputs=None):
         note = ""
         gap = None
         if h:
-            src_h = _source_max_height(cfg, vid)
+            src_h = _source_max_height(cfg, target)
             if src_h and src_h > h + 50:
                 note = "只下到 %dp，但源站有 %dp，可能临时降级" % (h, src_h)
                 # ★ 结构化差距，供前端弹出「问题解决」面板
@@ -360,7 +385,7 @@ def _worker(cfg, vid, dest_dir, min_height, outputs=None):
                     "local_h": h,
                     "src_h": src_h,
                     "local_mb": round(os.path.getsize(found) / 1024 ** 2, 1),
-                    "url": "https://www.youtube.com/watch?v=" + vid,
+                    "url": target,
                     "vid": vid,
                 }
             elif h < 1080:

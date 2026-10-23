@@ -340,7 +340,7 @@ height:340px;overflow-y:auto;font:12px/1.65 ui-monospace,Consolas,monospace;whit
 border-radius:50%;animation:spin .8s linear infinite;flex:none}
 tr.row:hover{background:#161b24}
 td{padding:7px 8px;border-bottom:1px solid #1e242d}
-td.ttl{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:0;color:#d7dce4}
+td.ttl{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#d7dce4}
 td.ttl:hover{color:#fff}
 </style>
 </head>
@@ -564,8 +564,9 @@ td.ttl:hover{color:#fff}
     <div class="stat" style="margin-top:6px">
       <span id="bCount"></span><span id="bDetail"></span>
     </div>
-    <div style="margin-top:10px">
+    <div style="margin-top:10px;display:flex;gap:8px">
       <button class="danger" onclick="stopBatch()" id="b-stopdl" style="font-size:12px;padding:6px 14px">停止下载</button>
+      <button class="ghost" onclick="openDir()" style="font-size:12px;padding:6px 14px">打开所在目录</button>
     </div>
   </div>
 
@@ -579,12 +580,24 @@ td.ttl:hover{color:#fff}
       以下操作针对<b style="color:#c3c9d2">刚刚下载到本地的视频</b>，可选做。
       执行时不会重新下载，中途停止也不会影响已下载的文件。
     </div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button class="ghost" onclick="go('lyrics')" id="b-lyrics" style="font-size:12.5px">抓取官方歌词</button>
-      <button class="ghost" onclick="go('report')" id="b-report" style="font-size:12.5px">生成 Excel 清单</button>
-      <button class="ghost" onclick="openDir()" style="font-size:12.5px">打开所在目录</button>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <button class="ghost" onclick="go('lyrics')" id="btnLyrics"
+          style="font-size:12.5px;flex:none;width:130px">抓取官方歌词</button>
+        <span id="stLyrics" style="font-size:11.5px;color:#5a6373">给已下载的视频抓 .srt 字幕 + .lrc</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <button class="ghost" onclick="go('report')" id="btnReport"
+          style="font-size:12.5px;flex:none;width:130px">生成 Excel 清单</button>
+        <span id="stReport" style="font-size:11.5px;color:#5a6373">整理成表格：画质 / 分类 / 难度 / 歌词路径</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <button class="ghost" onclick="openDir()"
+          style="font-size:12.5px;flex:none;width:130px">打开所在目录</button>
+        <span style="font-size:11.5px;color:#5a6373">在资源管理器里打开</span>
+      </div>
     </div>
-    <div id="nextRun" style="display:none;margin-top:14px;padding:12px;background:#141821;
+    <div id="nextRun" style="display:none;margin-top:16px;padding:12px;background:#141821;
          border:1px solid var(--line);border-radius:8px">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
         <div class="spin" id="advSpin"></div>
@@ -736,7 +749,9 @@ async function pollBatch(){
   if(!d.running){
     clearInterval(batchTimer); batchTimer=null;
     $('b-do').disabled = false;
+    $('b-do').textContent = '开始下载勾选的视频';
     $('b-stopdl').style.display = 'none';
+    document.getElementById('b-do').setAttribute('data-busy','0');
     if(d.stage==='完成'){
       $('bFill').style.width='100%'; $('bPct').textContent='100%';
       // 下载完成后才显示「后续可选操作」，避免干扰前面的选择
@@ -747,6 +762,8 @@ async function pollBatch(){
     if(d.error){ $('bDetail').textContent = d.error; }
   }else{
     $('b-stopdl').style.display = 'inline-block';
+    $('b-do').disabled = true;
+    $('b-do').textContent = '下载中…（完成后再点可追加，已下的会自动跳过）';
   }
 }
 
@@ -1018,6 +1035,15 @@ async function refresh(){
       $('advStage').textContent = (TASK_NAMES[d.task]||d.task||'处理中') +
         (total ? ('  '+done+' / '+total) : ' …');
       $('advNote').textContent = '可以随时点「停止」，已下载的文件不会受影响';
+      // 当前任务对应的按钮旁显示进度，另一个显示「等待中」
+      const isLyr = (d.task==='lyrics' || d.task==='lyrics-desc');
+      if(isLyr){
+        $('stLyrics').innerHTML = '<span style="color:var(--warn)">进行中 '+(total?(done+'/'+total):'')+'</span>';
+        $('stReport').innerHTML = '<span style="color:#3a4250">等待上面完成</span>';
+      }else if(d.task==='report'){
+        $('stReport').innerHTML = '<span style="color:var(--warn)">进行中 '+done+'/'+total+'</span>';
+        $('stLyrics').innerHTML = '<span style="color:#3a4250">等待上面完成</span>';
+      }
     }else{
       $('advSpin').style.display = 'none';
       $('advStop').style.display = 'none';
@@ -1030,6 +1056,10 @@ async function refresh(){
       }else{
         $('advStage').textContent = '待机';
       }
+      $('btnLyrics').disabled = false;
+      $('btnReport').disabled = false;
+      $('stLyrics').innerHTML = '给已下载的视频抓 .srt 字幕 + .lrc';
+      $('stReport').innerHTML = '整理成表格：画质 / 分类 / 难度 / 歌词路径';
     }
   }
 }
@@ -1041,6 +1071,9 @@ async function go(task){
   hadTask = true;
   $('nextStep').style.display = 'block';
   $('nextRun').style.display = 'block';
+  // 这两个操作都读写同一个目录，必须串行：跑一个时把另一个禁用
+  $('btnLyrics').disabled = true;
+  $('btnReport').disabled = true;
   $('advStage').textContent = (TASK_NAMES[task]||task) + ' 启动中…';
   $('advPct').textContent = '';
   $('advFill').style.width = '0%';
