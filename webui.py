@@ -64,6 +64,45 @@ def _run_task(task, cfg):
         _WORKER["task"] = ""
 
 
+def _fetch_ip(url, proxy, timeout=6):
+    """通过代理查一个回显 IP 的地址。返回 (ip, err)"""
+    import urllib.request
+    handlers = []
+    if proxy:
+        handlers.append(urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
+    else:
+        handlers.append(urllib.request.ProxyHandler({}))
+    try:
+        op = urllib.request.build_opener(*handlers)
+        r = op.open(url, timeout=timeout)
+        return r.read().decode("utf-8", "replace").strip(), ""
+    except Exception as e:
+        return "", str(e)[:80]
+
+
+def diagnose():
+    """诊断当前出口状态，供「画质未达标」时的解决面板使用"""
+    cfg = common.load_config()
+    net = cfg.get("network", {}) or {}
+    proxy = net.get("proxy") if net.get("proxy_enabled") else ""
+    ip4, e4 = _fetch_ip("https://api.ipify.org", proxy)
+    ip6, e6 = _fetch_ip("https://api64.ipify.org", proxy, timeout=5)
+    out = {
+        "proxy": proxy or "(未启用代理)",
+        "ipv4": ip4 or "",
+        "ipv4_error": e4,
+        "ip_any": ip6 or ip4 or "",
+        "using_ipv6": bool(ip6 and ":" in ip6),
+        "pot": "",
+    }
+    try:
+        pot_ok, pot_msg = dl.check_pot(cfg)
+        out["pot"] = ("在线" if pot_ok else "未响应") + " — " + pot_msg
+    except Exception:
+        out["pot"] = "未知"
+    return out
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
@@ -116,6 +155,7 @@ class Handler(BaseHTTPRequestHandler):
                     "deno": bool(common.find_deno(cfg)),
                     "aria2": bool(common.find_aria2(cfg)),
                 },
+                "channel": cfg.get("channel_url", ""),
             })
         if u.path == "/api/probe":
             cfg = common.load_config()
@@ -123,6 +163,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(sg.probe(cfg, url))
         if u.path == "/api/dl_status":
             return self._json(sg.task_state())
+        if u.path == "/api/diagnose":
+            return self._json(diagnose())
         if u.path == "/api/pick_folder":
             """弹系统原生目录选择框（独立子进程跑 tkinter，避免线程内崩溃）"""
             init = (q.get("init") or [""])[0]
@@ -175,6 +217,31 @@ class Handler(BaseHTTPRequestHandler):
             _WORKER["task"] = task
             t.start()
             return self._json({"ok": True, "task": task})
+        if u.path == "/api/save_config":
+            cfg = common.load_config()
+            ch = (q.get("channel") or [""])[0].strip()
+            od = (q.get("output_dir") or [""])[0].strip()
+            mh = (q.get("min_height") or [""])[0].strip()
+            changed = []
+            if ch:
+                cfg["channel_url"] = ch
+                changed.append("频道")
+            if od:
+                cfg["output_dir"] = od
+                changed.append("目录")
+            if mh:
+                try:
+                    cfg["quality"]["min_height"] = int(mh)
+                    changed.append("画质")
+                except ValueError:
+                    pass
+            try:
+                json.dump(cfg, open(common.CONFIG_PATH, "w", encoding="utf-8"),
+                          ensure_ascii=False, indent=2)
+                common.log("配置已保存：%s" % "、".join(changed))
+                return self._json({"ok": True, "changed": changed})
+            except Exception as e:
+                return self._json({"ok": False, "error": str(e)[:100]})
         if u.path == "/api/dl_single":
             cfg = common.load_config()
             url = (q.get("url") or [""])[0]
@@ -285,34 +352,112 @@ height:340px;overflow-y:auto;font:12px/1.65 ui-monospace,Consolas,monospace;whit
     <div class="stat" style="margin-top:2px"><span id="dlSpeed" style="font-size:12px"></span><span id="dlEta" style="font-size:12px"></span></div>
     <div id="dlDone" style="display:none;margin-top:10px;padding:10px;border-radius:7px;
          background:#12261c;border:1px solid #1f4d38">
-      <div id="dlDoneTitle" style="color:var(--ok);font-size:13px;margin-bottom:8px">✓ 下载完成</div>
+      <div id="dlDoneTitle" style="color:var(--ok);font-size:13px;margin-bottom:8px"></div>
       <div id="dlFiles"></div>
     </div>
     <div id="dlErr" style="display:none;margin-top:10px;color:var(--err);font-size:12.5px"></div>
     <div style="margin-top:10px"><button class="ghost" onclick="stopDl()" id="btnStopDl" style="font-size:12px;padding:6px 12px">取消下载</button></div>
   </div>
+
+  <div id="fixPanel" style="display:none;margin-top:14px;padding:14px;border-radius:8px;
+       background:#221a10;border:1px solid #6b4a1f">
+    <div id="fixHead" style="font-size:13.5px;font-weight:600;margin-bottom:10px;display:flex;align-items:center"></div>
+    <div style="font-size:12.5px;color:#c9b393;line-height:1.7;margin-bottom:12px">
+      <span style="color:#8a7a63">原因</span>　当前出口被 YouTube 临时降级，只返回了
+      <b id="fixLocal" style="color:var(--warn)"></b> 视频流
+    </div>
+    <div style="background:#191309;border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:12px">
+      <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+        <span style="color:#8a7a63">当前出口 IP</span><span id="fixIp" style="color:#e6e9ee"></span>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+        <span style="color:#8a7a63">IP 类型</span><span id="fixIpType" style="color:#e6e9ee"></span>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+        <span style="color:#8a7a63">代理地址</span><span id="fixProxy" style="color:#9aa3b0;font-size:11px"></span>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+        <span style="color:#8a7a63">本次下载</span><span id="fixSize" style="color:#e6e9ee"></span>
+      </div>
+      <div style="display:flex;justify-content:space-between;padding-top:6px;border-top:1px solid #3a2c19">
+        <span style="color:#8a7a63">源站最高</span><span id="fixSrc" style="color:var(--ok)"></span>
+      </div>
+    </div>
+    <div style="font-size:12.5px;color:#c9b393;margin-bottom:6px">解决步骤</div>
+    <ol style="margin:0 0 12px 20px;padding:0;font-size:12.5px;color:#b9c0cb;line-height:1.9">
+      <li>在代理客户端内关闭 <b>IPv6</b></li>
+      <li><b>断开</b>当前代理连接</li>
+      <li>重新选择<b>另一个节点</b>并连接</li>
+      <li>回到这里点击下方按钮<b>重新下载</b></li>
+    </ol>
+    <div style="display:flex;gap:8px">
+      <button onclick="retryDownload()" style="flex:1;background:#c8811f">重新解析并下载</button>
+      <button class="ghost" onclick="hideFix()" style="flex:none">关闭提示</button>
+    </div>
+  </div>
 </div>
 
-<div class="card" style="border-color:#242a33">
-  <div style="display:flex;align-items:center;justify-content:space-between">
-    <div style="display:flex;align-items:center;gap:8px">
-      <span style="font-size:14px;font-weight:600;color:var(--dim)">频道批量任务</span>
-      <span style="color:#5a6373;font-size:11.5px">（整频道下载 / 歌词 / 报表，一般用不到）</span>
+<div class="card" style="border-color:#2a3340">
+  <div style="font-size:15px;font-weight:600;margin-bottom:4px">频道批量下载</div>
+  <div style="color:var(--dim);font-size:12px;margin-bottom:16px">
+    把一个频道的所有视频一次下完，可选抓官方歌词、生成 Excel 清单
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:16px">
+    <div>
+      <div style="color:var(--dim);font-size:12px;margin-bottom:5px">频道地址</div>
+      <input id="bChannel" placeholder="https://www.youtube.com/@频道名/videos"
+        style="width:100%;background:#0b0e13;border:1px solid var(--line);color:var(--txt);
+        border-radius:7px;padding:9px 12px;font-size:13px;outline:none" spellcheck="false" />
     </div>
-    <button class="ghost" onclick="toggleBatch()" id="btnBatch" style="font-size:12px;padding:5px 12px">展开</button>
+    <div>
+      <div style="color:var(--dim);font-size:12px;margin-bottom:5px">保存到</div>
+      <div style="display:flex;gap:8px">
+        <input id="bDest" readonly onclick="pickBatchFolder()"
+          style="flex:1;background:#0b0e13;border:1px solid var(--line);color:var(--txt);
+          border-radius:7px;padding:9px 12px;font-size:12.5px;outline:none;cursor:pointer" />
+        <button class="ghost" onclick="pickBatchFolder()" style="flex:none;font-size:12.5px;padding:9px 16px">浏览…</button>
+      </div>
+    </div>
+    <div>
+      <div style="color:var(--dim);font-size:12px;margin-bottom:5px">画质门槛（低于此值会跳过，不会降清）</div>
+      <select id="bQuality" style="width:100%;background:#0b0e13;border:1px solid var(--line);
+        color:var(--txt);border-radius:7px;padding:9px 12px;font-size:13px;outline:none">
+        <option value="2160">4K（2160p）— 文件很大</option>
+        <option value="1080" selected>1080p — 推荐</option>
+        <option value="720">720p — 省空间</option>
+      </select>
+    </div>
   </div>
-  <div id="batchBody" style="display:none;margin-top:14px">
-  <div class="meta" id="meta"></div>
-  <div class="row">
-    <button onclick="go('check')" id="b-check">体检</button>
-    <button onclick="go('scan')" id="b-scan">1 扫描清单</button>
-    <button onclick="go('download')" id="b-download">2 下载</button>
-    <button onclick="go('lyrics')" id="b-lyrics">3 抓歌词</button>
-    <button onclick="go('report')" id="b-report">4 生成 Excel</button>
-    <button onclick="go('all')" id="b-all">一键全流程</button>
-    <button class="danger" onclick="stop()" id="b-stop">停止</button>
-    <button class="ghost" onclick="openDir()">打开输出目录</button>
+
+  <button onclick="startBatch()" id="b-start" style="width:100%;padding:11px">保存设置并开始下载</button>
+
+  <div id="batchProg" style="display:none;margin-top:16px;padding:12px;background:#141821;
+       border:1px solid var(--line);border-radius:8px">
+    <div class="stat" style="margin-bottom:8px">
+      <span id="bStage">准备中</span><span id="bPct">0%</span>
+    </div>
+    <div class="bar"><i id="bFill"></i></div>
+    <div class="stat" style="margin-top:6px">
+      <span id="bCount">0 / 0</span><span id="bUpdated"></span>
+    </div>
   </div>
+
+  <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line)">
+    <button class="ghost" onclick="toggleAdv()" id="btnAdv" style="font-size:12px;padding:6px 14px">更多操作</button>
+    <div id="advBody" style="display:none;margin-top:12px">
+      <div style="color:var(--dim);font-size:11.5px;margin-bottom:8px">单步执行（一般用不到，全部流程已包含在「开始下载」里）</div>
+      <div class="row">
+        <button class="ghost" onclick="go('check')" id="b-check" style="font-size:12.5px">环境体检</button>
+        <button class="ghost" onclick="go('scan')" id="b-scan" style="font-size:12.5px">1 只抓清单</button>
+        <button class="ghost" onclick="go('download')" id="b-download" style="font-size:12.5px">2 只下载</button>
+        <button class="ghost" onclick="go('lyrics')" id="b-lyrics" style="font-size:12.5px">3 只抓歌词</button>
+        <button class="ghost" onclick="go('report')" id="b-report" style="font-size:12.5px">4 只出表格</button>
+        <button class="danger" onclick="stop()" id="b-stop" style="font-size:12.5px">停止</button>
+        <button class="ghost" onclick="openDir()" style="font-size:12.5px">打开输出目录</button>
+      </div>
+      <div id="meta" class="meta" style="margin-top:12px"></div>
+    </div>
   </div>
 </div>
 
@@ -336,12 +481,43 @@ let probeTimer=null, dlTimer=null, lastUrl="", lastFile="", lastDest="", lastFil
 // ★ 只有本页面真正跑过任务，才显示状态条和日志；刷新后不显示历史残留
 let hadTask=false;
 
-function toggleBatch(){
-  const b=$('batchBody'), btn=$('btnBatch');
+function toggleAdv(){
+  const b=$('advBody'), btn=$('btnAdv');
   const open = b.style.display!=='none';
   b.style.display = open ? 'none' : 'block';
-  btn.textContent = open ? '展开' : '收起';
-  if(!open) refresh();   // 展开时立刻填充配置信息
+  btn.textContent = open ? '更多操作' : '收起更多操作';
+  if(!open) refresh();
+}
+
+async function pickBatchFolder(){
+  const cur = $('bDest').value.trim();
+  $('bDest').value = '选取中…';
+  try{
+    const r = await (await fetch('/api/pick_folder?init='+encodeURIComponent(cur))).json();
+    if(r.ok && r.path){ $('bDest').value = r.path; }
+    else { $('bDest').value = cur || ''; }
+  }catch(e){ $('bDest').value = cur || ''; }
+}
+
+async function startBatch(){
+  const ch = $('bChannel').value.trim();
+  const dest = $('bDest').value.trim();
+  const q = $('bQuality').value;
+  if(!ch){ alert('请填写频道地址'); $('bChannel').focus(); return; }
+  if(!dest){ alert('请选择保存目录'); return; }
+
+  $('b-start').disabled = true;
+  try{
+    const r = await (await fetch('/api/save_config?channel='+encodeURIComponent(ch)
+        +'&output_dir='+encodeURIComponent(dest)+'&min_height='+q, {method:'POST'})).json();
+    if(!r.ok){ alert('保存设置失败：'+(r.error||'')); $('b-start').disabled=false; return; }
+  }catch(e){
+    alert('保存设置失败'); $('b-start').disabled=false; return;
+  }
+  hadTask = true;
+  $('statusCard').style.display='block';
+  $('batchProg').style.display='block';
+  await go('all');
 }
 
 function $(id){return document.getElementById(id)}
@@ -413,6 +589,7 @@ async function startDl(){
 
   $('dlBox').style.display='block';
   $('dlDone').style.display='none';
+  hideFix();
   $('dlErr').style.display='none';
   $('dlFill').style.width='0%';
   $('dlPct').textContent='0%';
@@ -452,12 +629,15 @@ async function pollDl(){
       lastFile = d.file || (lastFiles[0] && lastFiles[0].path) || '';
       $('dlDone').style.display='block';
       $('dlDoneTitle').innerHTML = d.note
-        ? '<span style="color:var(--warn)">✓ 已下载（'+esc(d.note)+'）</span>'
-        : '<span style="color:var(--ok)">✓ 下载完成'+(d.res?' · '+esc(d.res):'')+'</span>';
+        ? svgIcon('warn')+'<span style="color:var(--warn)">已下载（'+esc(d.note)+'）</span>'
+        : svgIcon('ok')+'<span style="color:var(--ok)">下载完成'+(d.res?' · '+esc(d.res):'')+'</span>';
       renderFiles(lastFiles);
       $('dlFill').style.width='100%';
       $('dlPct').textContent='100%';
       $('btnStopDl').style.display='none';
+      // 画质差距 → 弹出解决面板
+      if(d.quality_gap){ showFixPanel(d.quality_gap); }
+      else { hideFix(); }
     }else if(d.error){
       $('dlErr').style.display='block';
       $('dlErr').textContent = d.error;
@@ -516,6 +696,43 @@ async function pickFolder(){
   }
 }
 
+function svgIcon(kind){
+  if(kind==='ok') return '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;color:var(--ok)"><polyline points="20 6 9 17 4 12"/></svg>';
+  if(kind==='warn') return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:6px;color:var(--warn)"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+  return '';
+}
+
+async function showFixPanel(gap){
+  // 面板一旦出现就保持不动，直到用户关闭或重新下载成功
+  const p = $('fixPanel');
+  p.style.display = 'block';
+  $('fixHead').innerHTML = svgIcon('warn') + '画质未达最佳';
+  $('fixLocal').textContent = gap.local_h + 'p';
+  $('fixSize').textContent = gap.local_h + 'p · ' + gap.local_mb + ' MB';
+  $('fixSrc').textContent = gap.src_h + 'p';
+  $('fixIp').textContent = '查询中…';
+  $('fixIpType').textContent = '查询中…';
+  $('fixProxy').textContent = '查询中…';
+  try{
+    const d = await (await fetch('/api/diagnose')).json();
+    $('fixIp').textContent = d.ipv4 || d.ip_any || '（查询失败）';
+    const isV6 = d.ipv4 ? (d.ipv4.indexOf(':')>=0) : false;
+    $('fixIpType').innerHTML = isV6
+      ? '<span style="color:var(--warn)">IPv6（强烈建议关闭）</span>'
+      : 'IPv4（正常）';
+    $('fixProxy').textContent = d.proxy || '';
+  }catch(e){
+    $('fixIp').textContent = '（查询失败）';
+  }
+}
+
+function hideFix(){ $('fixPanel').style.display='none'; }
+
+function retryDownload(){
+  hideFix();
+  startDl();
+}
+
 function esc(s){return String(s).replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]))}
 function dot(ok){return `<span class="dot ${ok?'on':'off'}"></span>`}
 
@@ -523,8 +740,13 @@ async function refresh(){
   let d;
   try{ d=await (await fetch('/api/status')).json(); }catch(e){ return; }
   const c=d.config, st=d.state||{}, t=d.tools;
-  // 批量配置信息只在展开时填充，避免一打开页面就看到一堆历史
-  if($('batchBody').style.display!=='none'){
+  // 频道地址/目录/画质：每次刷新同步到输入框（用户正在编辑时不覆盖）
+  if(!$('bChannel').matches(':focus') && !$('bChannel').value) $('bChannel').value = c.channel_url||'';
+  if(!$('bDest').value) $('bDest').value = c.output_dir||'';
+  if(s && c.min_height) $('bQuality').value = String(c.min_height);
+
+  // 高级区的配置信息只在展开时填充
+  if($('advBody').style.display!=='none'){
     document.getElementById('meta').innerHTML=`
       <div class="kv"><div class="k">输出目录</div><div class="v">${esc(c.output_dir)}</div></div>
       <div class="kv"><div class="k">频道</div><div class="v">${esc(c.channel_url||'未设置')}</div></div>
@@ -546,6 +768,17 @@ async function refresh(){
   document.getElementById('stage').textContent= busy? ('进行中：'+ (d.task||st.stage||'')) : '待机';
   document.getElementById('tstate').textContent= st.updated? ('更新于 '+st.updated):'';
 
+  // 批量进度条
+  if(hadTask){
+    $('batchProg').style.display='block';
+    $('bFill').style.width = pct+'%';
+    $('bPct').textContent = pct+'%';
+    $('bCount').textContent = total ? (done+' / '+total) : '';
+    $('bStage').textContent = busy ? ('进行中：'+(d.task||st.stage||'')) : ((st.stage==='report')?'已完成':'待机');
+    $('bUpdated').textContent = st.updated? ('更新于 '+st.updated):'';
+    $('b-start').disabled = busy;
+  }
+
   const log=document.getElementById('log');
   log.innerHTML=(d.events||[]).map(e=>`<div class="${e.level||'INFO'}">${esc(e.msg)}</div>`).join('');
   log.scrollTop=log.scrollHeight;
@@ -559,6 +792,7 @@ async function refresh(){
 async function go(task){
   hadTask = true;
   $('statusCard').style.display='block';
+  $('batchProg').style.display='block';
   const r=await fetch('/api/start?task='+task,{method:'POST'});
   if(!r.ok){ const j=await r.json(); alert(j.error||'启动失败'); }
   refresh();

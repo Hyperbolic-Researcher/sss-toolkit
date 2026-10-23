@@ -165,7 +165,7 @@ def start_download(cfg, url, dest_dir, min_height=None, outputs=None):
             "running": True, "url": url, "title": "", "dest": dest_dir,
             "percent": 0.0, "speed": "", "eta": "", "stage": "准备中",
             "file": "", "error": "", "started": time.time(),
-            "files": [], "outputs": outputs,
+            "files": [], "outputs": outputs, "quality_gap": None,
         })
         _STOP["flag"] = False
 
@@ -350,10 +350,19 @@ def _worker(cfg, vid, dest_dir, min_height, outputs=None):
         #   实测踩过：某次源站有 1080p，实际却下到 360p（当时源站临时降级），
         #   如果只说「该视频源站最高只有 360p」就是在撒谎，用户也没法判断要不要重试。
         note = ""
+        gap = None
         if h:
             src_h = _source_max_height(cfg, vid)
             if src_h and src_h > h + 50:
-                note = "⚠ 只下到 %dp，但源站有 %dp —— 可能临时降级，建议重试" % (h, src_h)
+                note = "只下到 %dp，但源站有 %dp，可能临时降级" % (h, src_h)
+                # ★ 结构化差距，供前端弹出「问题解决」面板
+                gap = {
+                    "local_h": h,
+                    "src_h": src_h,
+                    "local_mb": round(os.path.getsize(found) / 1024 ** 2, 1),
+                    "url": "https://www.youtube.com/watch?v=" + vid,
+                    "vid": vid,
+                }
             elif h < 1080:
                 note = "该视频源站最高就是 %dp，已按最高可用下载" % h
 
@@ -369,6 +378,7 @@ def _worker(cfg, vid, dest_dir, min_height, outputs=None):
                 "title": _TASK["title"] or clean,
                 "res": ("%dx%d" % (w, h)) if h else "",
                 "note": note,
+                "quality_gap": gap,
             })
     except Exception as e:
         with _TASK_LOCK:
