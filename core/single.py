@@ -174,6 +174,25 @@ def start_download(cfg, url, dest_dir, min_height=None, outputs=None):
     return True, "已开始"
 
 
+def _source_max_height(cfg, vid):
+    """查源站该视频最高可用视频流高度。失败返回 0（不阻断流程）"""
+    args = base_args(cfg) + ["-F", "--no-warnings", "--socket-timeout", "25",
+                             "https://www.youtube.com/watch?v=" + vid]
+    try:
+        r = subprocess.run(args, capture_output=True, text=True,
+                           env=common.env_no_proxy(), timeout=90,
+                           encoding="utf-8", errors="replace")
+        t = (r.stdout or "") + (r.stderr or "")
+    except Exception:
+        return 0
+    best = 0
+    for line in t.split("\n"):
+        m = re.match(r"^\d{2,4}\s+(?:mp4|webm)\s+\d{2,4}x(\d{2,4})", line.strip())
+        if m:
+            best = max(best, int(m.group(1)))
+    return best
+
+
 def _ffmpeg_make(ff, src, dst, video=True):
     """用 ffmpeg 派生文件。video=True 去音轨；video=False 提音频。返回是否成功"""
     if not ff:
@@ -327,9 +346,16 @@ def _worker(cfg, vid, dest_dir, min_height, outputs=None):
             h, w = info.get("height", 0), info.get("width", 0)
         except Exception:
             pass
+        # ★ 完成后必须核对「本地 vs 源站最高」，不能只看是否下到文件
+        #   实测踩过：某次源站有 1080p，实际却下到 360p（当时源站临时降级），
+        #   如果只说「该视频源站最高只有 360p」就是在撒谎，用户也没法判断要不要重试。
         note = ""
-        if h and h < 1080:
-            note = "该视频源站最高只有 %dp，已按最高可用下载" % h
+        if h:
+            src_h = _source_max_height(cfg, vid)
+            if src_h and src_h > h + 50:
+                note = "⚠ 只下到 %dp，但源站有 %dp —— 可能临时降级，建议重试" % (h, src_h)
+            elif h < 1080:
+                note = "该视频源站最高就是 %dp，已按最高可用下载" % h
 
         clean = re.sub(r"\s*\[[A-Za-z0-9_-]{11}\](\.[A-Za-z0-9]+)?$", "",
                        os.path.basename(found))
@@ -362,7 +388,7 @@ def _sweep_intermediates(d):
       现在 .part / .ytdl 也一并移入隔离区。
     """
     q = d.rstrip("/\\") + "_quarantine"
-    pats = (r"\.f\d+\.(mp4|webm|m4a)$", r"\.part$", r"\.ytdl$")
+    pats = (r"\.f\d+(-\d+)?\.(mp4|webm|m4a)$", r"\.part$", r"\.ytdl$")
     for f in os.listdir(d):
         if any(re.search(p, f) for p in pats):
             try:
