@@ -10,7 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from core import common, scan as scan_mod, download as dl, lyrics as lyr, report as rep
+from core import common, scan as scan_mod, download as dl, lyrics as lyr, report as rep, single as sg
 
 PORT = int(os.environ.get("SSS_PORT", "8765"))
 # ★ 手机访问：默认只监听本机；加 --lan 参数则监听所有网卡，手机连同一 WiFi 即可访问
@@ -117,6 +117,22 @@ class Handler(BaseHTTPRequestHandler):
                     "aria2": bool(common.find_aria2(cfg)),
                 },
             })
+        if u.path == "/api/probe":
+            cfg = common.load_config()
+            url = (q.get("url") or [""])[0]
+            return self._json(sg.probe(cfg, url))
+        if u.path == "/api/dl_status":
+            return self._json(sg.task_state())
+        if u.path == "/api/open_folder":
+            path = (q.get("path") or [""])[0]
+            try:
+                if path and os.path.exists(path):
+                    d = path if os.path.isdir(path) else os.path.dirname(path)
+                    os.startfile(d)
+                    return self._json({"ok": True})
+                return self._json({"ok": False, "error": "路径不存在"})
+            except Exception as e:
+                return self._json({"ok": False, "error": str(e)[:80]})
         if u.path == "/api/open":
             cfg = common.load_config()
             try:
@@ -142,6 +158,15 @@ class Handler(BaseHTTPRequestHandler):
             _WORKER["task"] = task
             t.start()
             return self._json({"ok": True, "task": task})
+        if u.path == "/api/dl_single":
+            cfg = common.load_config()
+            url = (q.get("url") or [""])[0]
+            dest = (q.get("dest") or [cfg["output_dir"]])[0]
+            ok, msg = sg.start_download(cfg, url, dest)
+            return self._json({"ok": ok, "msg": msg})
+        if u.path == "/api/dl_stop":
+            sg.stop_task()
+            return self._json({"ok": True})
         if u.path == "/api/stop":
             _STOP["flag"] = True
             common.log("已请求停止（当前批次结束后生效）", "WARN")
@@ -194,6 +219,50 @@ height:340px;overflow-y:auto;font:12px/1.65 ui-monospace,Consolas,monospace;whit
 <h1>频道资料库 · 一键构建</h1>
 <div class="sub">下载 · 官方歌词 · 难度分级 · Excel 清单 —— 改 config.json 即可换频道</div>
 
+<div class="card" style="border-color:#2f4a6d">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+    <span style="font-size:15px;font-weight:600">单视频下载</span>
+    <span style="color:var(--dim);font-size:12px">粘贴链接自动解析，回车即下</span>
+  </div>
+  <div style="display:flex;gap:8px">
+    <input id="dlUrl" placeholder="粘贴 YouTube 链接…（支持 watch / youtu.be / shorts）"
+      style="flex:1;background:#0b0e13;border:1px solid var(--line);color:var(--txt);
+      border-radius:7px;padding:10px 12px;font-size:13.5px;outline:none"
+      autocomplete="off" spellcheck="false" />
+    <button class="ghost" onclick="doProbe(true)">解析</button>
+  </div>
+  <div id="probeMsg" style="margin-top:8px;font-size:12.5px;color:var(--dim)"></div>
+  <div id="probeBox" style="display:none;margin-top:12px;background:#141821;
+       border:1px solid var(--line);border-radius:8px;padding:12px">
+    <div id="vTitle" style="font-size:14px;font-weight:600;margin-bottom:6px"></div>
+    <div id="vMeta" style="color:var(--dim);font-size:12.5px;margin-bottom:12px"></div>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+      <span style="color:var(--dim);font-size:12.5px">保存到</span>
+      <input id="dlDest" list="destList" style="flex:1;min-width:240px;background:#0b0e13;
+        border:1px solid var(--line);color:var(--txt);border-radius:6px;padding:7px 10px;
+        font-size:12.5px;outline:none" />
+      <datalist id="destList"></datalist>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button id="btnDl" onclick="startDl()" style="flex:1">开始下载</button>
+      <button class="ghost" onclick="openDest()">打开目录</button>
+    </div>
+  </div>
+  <div id="dlBox" style="display:none;margin-top:12px">
+    <div class="bar"><i id="dlFill"></i></div>
+    <div class="stat" style="margin-top:6px"><span id="dlStage">准备中</span><span id="dlPct">0%</span></div>
+    <div class="stat" style="margin-top:2px"><span id="dlSpeed" style="font-size:12px"></span><span id="dlEta" style="font-size:12px"></span></div>
+    <div id="dlDone" style="display:none;margin-top:10px;padding:10px;border-radius:7px;
+         background:#12261c;border:1px solid #1f4d38">
+      <div id="dlDoneTitle" style="color:var(--ok);font-size:13px;margin-bottom:4px">✓ 下载完成</div>
+      <div id="dlFile" style="color:var(--dim);font-size:11.5px;word-break:break-all;margin-bottom:8px"></div>
+      <button class="ghost" onclick="openFile()" style="font-size:12px;padding:6px 12px">打开所在文件夹</button>
+    </div>
+    <div id="dlErr" style="display:none;margin-top:10px;color:var(--err);font-size:12.5px"></div>
+    <div style="margin-top:10px"><button class="ghost" onclick="stopDl()" id="btnStopDl" style="font-size:12px;padding:6px 12px">取消下载</button></div>
+  </div>
+</div>
+
 <div class="card">
   <div class="meta" id="meta"></div>
   <div class="row">
@@ -222,6 +291,142 @@ height:340px;overflow-y:auto;font:12px/1.65 ui-monospace,Consolas,monospace;whit
 
 <script>
 let busy=false;
+
+// ══ 单视频下载 ══
+let probeTimer=null, dlTimer=null, lastUrl="", lastFile="", lastDest="";
+
+function $(id){return document.getElementById(id)}
+
+const urlEl = $('dlUrl');
+urlEl.addEventListener('input', ()=>{
+  clearTimeout(probeTimer);
+  const v = urlEl.value.trim();
+  if(!v){ $('probeMsg').textContent=''; $('probeBox').style.display='none'; return; }
+  // 看着像链接才自动解析，避免打字过程中乱请求
+  if(/youtu\.?be|youtube\.com|^[A-Za-z0-9_-]{11}$/.test(v)){
+    probeTimer = setTimeout(()=>doProbe(false), 650);
+  }
+});
+urlEl.addEventListener('paste', ()=>{
+  // 粘贴后立刻解析，不等防抖
+  clearTimeout(probeTimer);
+  setTimeout(()=>doProbe(false), 120);
+});
+urlEl.addEventListener('keydown', e=>{
+  if(e.key==='Enter'){ e.preventDefault(); doProbe(true); }
+});
+
+async function doProbe(manual){
+  const v = urlEl.value.trim();
+  if(!v) return;
+  if(v===lastUrl && !manual && $('probeBox').style.display!=='none') return;
+  $('probeMsg').innerHTML = '<span style="color:var(--warn)">解析中…</span>';
+  $('probeBox').style.display='none';
+  try{
+    const r = await (await fetch('/api/probe?url='+encodeURIComponent(v))).json();
+    if(!r.ok){
+      $('probeMsg').innerHTML = '<span style="color:var(--err)">'+esc(r.error||'解析失败')+'</span>';
+      return;
+    }
+    lastUrl = v;
+    $('probeMsg').textContent = '';
+    $('vTitle').textContent = r.title || '(无标题)';
+    const bits = [];
+    if(r.duration_text) bits.push('时长 '+r.duration_text);
+    if(r.max_height) bits.push('最高画质 '+(r.max_height>=1080?'<b style="color:var(--ok)">'+r.max_height+'p</b>':'<b style="color:var(--warn)">'+r.max_height+'p（源站上限）</b>'));
+    if(r.uploader) bits.push(esc(r.uploader));
+    if(r.upload_date) bits.push(r.upload_date);
+    if(r.views) bits.push(r.views.toLocaleString()+' 次观看');
+    $('vMeta').innerHTML = bits.join(' · ');
+    $('probeBox').style.display='block';
+
+    // 保存目录候选
+    const dl = $('destList');
+    if(!dl.dataset.filled){
+      dl.innerHTML = '<option value="E://SuperSimpleSongs"><option value="E://SuperSimpleSongs_低清归档">';
+      dl.dataset.filled='1';
+    }
+    if(!$('dlDest').value) $('dlDest').value = 'E://SuperSimpleSongs';
+  }catch(e){
+    $('probeMsg').innerHTML = '<span style="color:var(--err)">请求失败：'+esc(String(e))+'</span>';
+  }
+}
+
+async function startDl(){
+  const url = urlEl.value.trim();
+  const dest = $('dlDest').value.trim();
+  if(!url){ alert('请先粘贴链接'); return; }
+  if(!dest){ alert('请填写保存目录'); return; }
+  lastDest = dest;
+
+  $('dlBox').style.display='block';
+  $('dlDone').style.display='none';
+  $('dlErr').style.display='none';
+  $('dlFill').style.width='0%';
+  $('dlPct').textContent='0%';
+  $('dlStage').textContent='准备中';
+  $('dlSpeed').textContent='';
+  $('dlEta').textContent='';
+  $('btnDl').disabled = true;
+
+  const r = await (await fetch('/api/dl_single?url='+encodeURIComponent(url)+'&dest='+encodeURIComponent(dest),{method:'POST'})).json();
+  if(!r.ok){
+    $('dlErr').style.display='block';
+    $('dlErr').textContent = r.msg || '启动失败';
+    $('btnDl').disabled = false;
+    return;
+  }
+  clearInterval(dlTimer);
+  dlTimer = setInterval(pollDl, 600);
+  pollDl();
+}
+
+async function pollDl(){
+  let d;
+  try{ d = await (await fetch('/api/dl_status')).json(); }catch(e){ return; }
+  const pct = Math.max(0, Math.min(100, d.percent||0));
+  $('dlFill').style.width = pct+'%';
+  $('dlPct').textContent = pct.toFixed(0)+'%';
+  $('dlStage').textContent = d.stage || '';
+  $('dlSpeed').textContent = d.speed ? ('速度 '+d.speed) : '';
+  $('dlEta').textContent = d.eta ? ('剩余 '+d.eta) : '';
+  if(d.title) $('vTitle').textContent = d.title;
+
+  if(!d.running){
+    clearInterval(dlTimer); dlTimer=null;
+    $('btnDl').disabled = false;
+    if(d.stage==='完成'){
+      lastFile = d.file||'';
+      $('dlDone').style.display='block';
+      $('dlDoneTitle').innerHTML = d.note
+        ? '<span style="color:var(--warn)">✓ 已下载（'+esc(d.note)+'）</span>'
+        : '<span style="color:var(--ok)">✓ 下载完成'+(d.res?' · '+esc(d.res):'')+'</span>';
+      $('dlFile').textContent = d.file||'';
+      $('dlFill').style.width='100%';
+      $('dlPct').textContent='100%';
+      $('btnStopDl').style.display='none';
+    }else if(d.error){
+      $('dlErr').style.display='block';
+      $('dlErr').textContent = d.error;
+      $('btnStopDl').style.display='none';
+    }
+  }else{
+    $('btnStopDl').style.display='inline-block';
+  }
+}
+
+async function stopDl(){
+  await fetch('/api/dl_stop',{method:'POST'});
+  $('dlStage').textContent='正在停止…';
+}
+function openFile(){
+  if(lastFile) fetch('/api/open_folder?path='+encodeURIComponent(lastFile));
+}
+function openDest(){
+  const d = $('dlDest').value.trim() || lastDest;
+  if(d) fetch('/api/open_folder?path='+encodeURIComponent(d));
+}
+
 function esc(s){return String(s).replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]))}
 function dot(ok){return `<span class="dot ${ok?'on':'off'}"></span>`}
 
