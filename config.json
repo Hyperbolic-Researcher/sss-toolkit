@@ -1,6 +1,6 @@
 {
-  "output_dir": "E:\\SSS_batch_test",
-  "channel_url": "https://www.youtube.com/@SuperSimpleSongs/videos",
+  "output_dir": "E:\\SSS_pipeline_test",
+  "channel_url": "https://www.youtube.com/@SuperSimpleSongs",
   "quality": {
     "mode": "strict",
     "min_height": 1080,

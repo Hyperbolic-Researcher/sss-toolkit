@@ -508,8 +508,10 @@ td.ttl:hover{color:#fff}
   <!-- 步骤二：列表 -->
   <div id="listBox" style="display:none;margin-top:16px">
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
-      <button class="ghost" onclick="toggleAll(true)" style="font-size:12px;padding:5px 12px">全选</button>
-      <button class="ghost" onclick="toggleAll(false)" style="font-size:12px;padding:5px 12px">取消全选</button>
+      <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;cursor:pointer;user-select:none">
+        <input type="checkbox" id="chkAll" onchange="toggleAll(this.checked)"
+          style="width:15px;height:15px;cursor:pointer" /> 全选
+      </label>
       <span id="listStat" style="color:var(--dim);font-size:12px"></span>
       <input id="listFilter" placeholder="搜索标题…" oninput="renderList()"
         style="margin-left:auto;background:#0b0e13;border:1px solid var(--line);color:var(--txt);
@@ -567,68 +569,35 @@ td.ttl:hover{color:#fff}
     </div>
   </div>
 
-  <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--line)">
-    <button class="ghost" onclick="toggleAdv()" id="btnAdv" style="font-size:12px;padding:6px 14px">高级操作</button>
-    <div id="advBody" style="display:none;margin-top:14px">
-
-      <div style="background:#141821;border:1px solid var(--line);border-radius:8px;
-           padding:10px 12px;margin-bottom:14px">
-        <div style="font-size:12px;color:#8b95a5;line-height:1.75">
-          下面几项针对<b style="color:#c3c9d2">已经下载到本地的视频</b>，与上方的下载任务<b>互不影响</b>，可单独执行。<br>
-          执行时会出现进度条，随时可以点「停止」；<b style="color:#c3c9d2">中途停止不会损坏已下载的视频</b>。
-        </div>
+  <!-- 下载完成后才出现：后续可选操作 -->
+  <div id="nextStep" style="display:none;margin-top:18px;padding-top:16px;border-top:1px solid var(--line)">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+      <span id="nsIcon"></span>
+      <span id="nsTitle" style="font-size:13.5px;font-weight:600;color:var(--ok)">下载完成</span>
+    </div>
+    <div style="font-size:12px;color:#8b95a5;line-height:1.7;margin-bottom:12px">
+      以下操作针对<b style="color:#c3c9d2">刚刚下载到本地的视频</b>，可选做。
+      执行时不会重新下载，中途停止也不会影响已下载的文件。
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="ghost" onclick="go('lyrics')" id="b-lyrics" style="font-size:12.5px">抓取官方歌词</button>
+      <button class="ghost" onclick="go('report')" id="b-report" style="font-size:12.5px">生成 Excel 清单</button>
+      <button class="ghost" onclick="openDir()" style="font-size:12.5px">打开所在目录</button>
+    </div>
+    <div id="nextRun" style="display:none;margin-top:14px;padding:12px;background:#141821;
+         border:1px solid var(--line);border-radius:8px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+        <div class="spin" id="advSpin"></div>
+        <span id="advStage" style="font-size:12.5px"></span>
+        <span id="advPct" style="margin-left:auto;font-size:12px;color:var(--dim)"></span>
+        <button class="danger" onclick="stopAdv()" id="advStop"
+          style="font-size:12px;padding:5px 14px;flex:none">停止</button>
       </div>
-
-      <div style="display:flex;flex-direction:column;gap:12px">
-        <div style="display:flex;align-items:flex-start;gap:12px">
-          <button class="ghost" onclick="go('check')" id="b-check"
-            style="font-size:12.5px;flex:none;width:104px">检查环境</button>
-          <div style="font-size:11.5px;color:#7c8593;line-height:1.6;padding-top:6px">
-            测试代理、POT 服务、能不能取到高清流。只做探测，<b>不会下载任何文件</b>
-          </div>
-        </div>
-        <div style="display:flex;align-items:flex-start;gap:12px">
-          <button class="ghost" onclick="go('lyrics')" id="b-lyrics"
-            style="font-size:12.5px;flex:none;width:104px">抓取歌词</button>
-          <div style="font-size:11.5px;color:#7c8593;line-height:1.6;padding-top:6px">
-            给已下载的视频抓官方字幕，生成 .srt（带时间轴）/ .lrc / .txt
-          </div>
-        </div>
-        <div style="display:flex;align-items:flex-start;gap:12px">
-          <button class="ghost" onclick="go('report')" id="b-report"
-            style="font-size:12.5px;flex:none;width:104px">生成 Excel</button>
-          <div style="font-size:11.5px;color:#7c8593;line-height:1.6;padding-top:6px">
-            把已下载的视频整理成表格：标题、画质、分类、难度、歌词路径等
-          </div>
-        </div>
-        <div style="display:flex;align-items:flex-start;gap:12px">
-          <button class="ghost" onclick="openDir()"
-            style="font-size:12.5px;flex:none;width:104px">打开目录</button>
-          <div style="font-size:11.5px;color:#7c8593;line-height:1.6;padding-top:6px">
-            在资源管理器里打开保存目录
-          </div>
-        </div>
-      </div>
-
-      <div id="advRun" style="display:none;margin-top:16px;padding:12px;background:#141821;
-           border:1px solid var(--line);border-radius:8px">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
-          <div class="spin" id="advSpin"></div>
-          <span id="advStage" style="font-size:12.5px;color:var(--txt)"></span>
-          <span id="advPct" style="margin-left:auto;font-size:12px;color:var(--dim)"></span>
-          <button class="danger" onclick="stopAdv()" id="advStop"
-            style="font-size:12px;padding:5px 14px;flex:none">停止</button>
-        </div>
-        <div class="bar"><i id="advFill"></i></div>
-        <div id="advNote" style="color:#5a6373;font-size:11.5px;margin-top:8px"></div>
-      </div>
-
-      <div id="meta" class="meta" style="margin-top:14px"></div>
+      <div class="bar"><i id="advFill"></i></div>
+      <div id="advNote" style="color:#5a6373;font-size:11.5px;margin-top:8px"></div>
     </div>
   </div>
 </div>
-
-div>
 
 <script>
 let busy=false;
@@ -637,14 +606,6 @@ let busy=false;
 let probeTimer=null, dlTimer=null, lastUrl="", lastFile="", lastDest="", lastFiles=[];
 // ★ 只有本页面真正跑过任务，才显示状态条和日志；刷新后不显示历史残留
 let hadTask=false;
-
-function toggleAdv(){
-  const b=$('advBody'), btn=$('btnAdv');
-  const open = b.style.display!=='none';
-  b.style.display = open ? 'none' : 'block';
-  btn.textContent = open ? '更多操作' : '收起更多操作';
-  if(!open) refresh();
-}
 
 // ══ 频道批量：三步流程 ══
 let parseTimer=null, batchTimer=null, scanItems=[], selSet=new Set();
@@ -715,13 +676,15 @@ function renderList(){
       const on = selSet.has(x.id);
       return '<tr class="row">'
         + '<td style="text-align:center"><input type="checkbox" '+(on?'checked':'')+' onchange="toggleOne(\''+x.id+'\',this.checked)" style="width:14px;height:14px;cursor:pointer" /></td>'
-        + '<td style="color:#d7dce4">'+esc(x.title||x.id)+'</td>'
-        + '<td style="text-align:right;color:var(--dim)">'+(x.dur_text||'')+'</td>'
-        + '<td style="text-align:right;color:var(--dim)">'+(x.size_mb?('~'+x.size_mb+' MB'):'—')+'</td>'
+        + '<td class="ttl" title="'+esc(x.title||x.id)+'">'+esc(x.title||x.id)+'</td>' 
+        + '<td style="text-align:right;color:var(--dim);white-space:nowrap">'+(x.dur_text||'')+'</td>' 
+        + '<td style="text-align:right;color:var(--dim);white-space:nowrap">'+(x.size_mb?('~'+x.size_mb+' MB'):'—')+'</td>' 
         + '</tr>';
     }).join('');
   }
   $('listStat').textContent = '共 ' + scanItems.length + ' 个 · 已选 ' + selSet.size;
+  const ca = $('chkAll');
+  if(ca){ ca.checked = scanItems.length>0 && selSet.size===scanItems.length; ca.indeterminate = selSet.size>0 && selSet.size<scanItems.length; }
 }
 
 function toggleOne(id, on){ on ? selSet.add(id) : selSet.delete(id); renderList(); }
@@ -774,7 +737,13 @@ async function pollBatch(){
     clearInterval(batchTimer); batchTimer=null;
     $('b-do').disabled = false;
     $('b-stopdl').style.display = 'none';
-    if(d.stage==='完成'){ $('bFill').style.width='100%'; $('bPct').textContent='100%'; }
+    if(d.stage==='完成'){
+      $('bFill').style.width='100%'; $('bPct').textContent='100%';
+      // 下载完成后才显示「后续可选操作」，避免干扰前面的选择
+      $('nextStep').style.display='block';
+      $('nsTitle').textContent = '下载完成（' + (d.total||0) + ' 个）';
+      $('nextRun').style.display = 'none';
+    }
     if(d.error){ $('bDetail').textContent = d.error; }
   }else{
     $('b-stopdl').style.display = 'inline-block';
@@ -1027,20 +996,7 @@ async function refresh(){
   if(!$('bChannel').matches(':focus') && !$('bChannel').value) $('bChannel').value = c.channel_url||'';
   if(!$('bDest').value) $('bDest').value = c.output_dir||'';
 
-  // 高级区的配置信息只在展开时填充
-  if($('advBody').style.display!=='none'){
-    document.getElementById('meta').innerHTML=`
-      <div class="kv"><div class="k">输出目录</div><div class="v">${esc(c.output_dir)}</div></div>
-      <div class="kv"><div class="k">频道</div><div class="v">${esc(c.channel_url||'未设置')}</div></div>
-      <div class="kv"><div class="k">画质门槛</div><div class="v">${c.min_height}p 以上（不降清）</div></div>
-      <div class="kv"><div class="k">工具链</div><div class="v">${dot(t.ffmpeg)}ffmpeg ${dot(t.deno)}deno ${dot(t.aria2)}aria2</div></div>`;
-  }
-
-  busy=d.busy;
-  ['check','scan','download','lyrics','report','all'].forEach(k=>{
-    document.getElementById('b-'+k).disabled=busy;
-  });
-  document.getElementById('b-stop').disabled=!busy;
+  busy = d.busy;
 
   const total=+(st.total||0), done=+(st.done||0);
   const pct= total? Math.min(100,Math.round(done/total*100)) : 0;
@@ -1051,8 +1007,8 @@ async function refresh(){
   document.getElementById('tstate').textContent= st.updated? ('更新于 '+st.updated):'';
 
   // 高级操作区的任务进度
-  if(hadTask && $('advBody').style.display!=='none'){
-    $('advRun').style.display = 'block';
+  if(hadTask && $('nextStep').style.display!=='none'){
+    $('nextRun').style.display = 'block';
     $('advFill').style.width = pct+'%';
     $('advPct').textContent = total ? (pct+'%') : '';
     if(busy){
@@ -1083,7 +1039,8 @@ const TASK_NAMES = {check:'检查环境', scan:'抓取清单', download:'下载�
 
 async function go(task){
   hadTask = true;
-  $('advRun').style.display = 'block';
+  $('nextStep').style.display = 'block';
+  $('nextRun').style.display = 'block';
   $('advStage').textContent = (TASK_NAMES[task]||task) + ' 启动中…';
   $('advPct').textContent = '';
   $('advFill').style.width = '0%';
@@ -1092,7 +1049,7 @@ async function go(task){
   $('advSpin').style.display = 'block';
 
   const r = await fetch('/api/start?task='+task,{method:'POST'});
-  if(!r.ok){ const j=await r.json(); alert(j.error||'启动失败'); $('advRun').style.display='none'; }
+  if(!r.ok){ const j=await r.json(); alert(j.error||'启动失败'); $('nextRun').style.display='none'; }
   refresh();
 }
 

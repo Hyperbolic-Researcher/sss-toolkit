@@ -125,6 +125,30 @@ def _worker(cfg, ids, outs):
                 except Exception:
                     pass
 
+        # ★ 把本次勾选的清单落到目标目录，供后续「抓歌词 / 生成 Excel」使用。
+        #   否则用户换了保存目录后，这两个功能会因为找不到 videos.txt 而报"清单为空"。
+        #   若目录已有清单，则合并去重（保留原有条目）。
+        try:
+            # ★ 必须先建目录：用户可能选一个还没建的新文件夹，
+            #   而 os.makedirs 原本在 dl.download() 内部才执行，
+            #   导致这里 open(...,'w') 直接 Errno 2（实测踩过）。
+            os.makedirs(out_dir, exist_ok=True)
+            vl = os.path.join(out_dir, "videos.txt")
+            exist = {}
+            if os.path.exists(vl):
+                for line in open(vl, encoding="utf-8", errors="replace"):
+                    q = line.strip().split("|")
+                    if len(q) >= 4 and re.fullmatch(r"[A-Za-z0-9_-]{11}", q[0]):
+                        exist[q[0]] = line.strip()
+            for vid in ids:
+                exist.setdefault(vid, "%s||0|" % vid)
+            with open(vl, "w", encoding="utf-8") as f:
+                for line in exist.values():
+                    f.write(line + "\n")
+            common.log("已写入清单 %d 条 -> %s" % (len(exist), vl))
+        except Exception as e:
+            common.log("写清单失败：%s" % str(e)[:80], "WARN")
+
         threading.Thread(target=_monitor, daemon=True).start()
         try:
             dl.download(cfg, only_ids=ids, stop_flag=lambda: _STOP["flag"])

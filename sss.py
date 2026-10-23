@@ -51,9 +51,25 @@ def cmd_check(cfg, quick=False):
     except Exception as e:
         rows.append(("输出目录", False, "%s 不可写: %s" % (od, str(e)[:40])))
 
-    # 5) 通道质量（关键：能识破 360p 降级）
-    ok_h, msg_h, fid = dl.probe_health(cfg)
-    rows.append(("节点质量", ok_h, msg_h))
+    # 5) 通道质量
+    # ★ 出流测试要跑一次完整的 yt-dlp 解析（10-60 秒），不适合"随手点一下"的场景。
+    #   quick 模式只做秒级检查：代理连通 + POT 在线。
+    if quick:
+        import urllib.request
+        net = cfg.get("network", {}) or {}
+        proxy = net.get("proxy") if net.get("proxy_enabled") else ""
+        ip, err = "", ""
+        try:
+            handlers = [urllib.request.ProxyHandler({"http": proxy, "https": proxy})] if proxy \
+                else [urllib.request.ProxyHandler({})]
+            op = urllib.request.build_opener(*handlers)
+            ip = op.open("https://api.ipify.org", timeout=6).read().decode().strip()
+        except Exception as e:
+            err = str(e)[:50]
+        rows.append(("代理连通", bool(ip), ("出口 IP " + ip) if ip else ("连不上: " + err)))
+    else:
+        ok_h, msg_h, fid = dl.probe_health(cfg)
+        rows.append(("节点质量", ok_h, msg_h))
 
     all_ok = all(r[1] for r in rows)
 
